@@ -1,9 +1,9 @@
 /**
  * IntersectionScene — R3F Canvas root.
- * Renders all 3D objects from simulation state.
+ * Must be placed inside a container with explicit width + height.
  */
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Stars } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei'
 import RoadSystem from './RoadSystem'
 import VehicleModel from './VehicleModel'
 import PedestrianModel from './PedestrianModel'
@@ -15,9 +15,8 @@ export default function IntersectionScene({ vehicles = [], pedestrians = [], lig
     <Canvas
       shadows
       camera={{ position: [0, 90, 90], fov: 45, near: 0.1, far: 1000 }}
-      style={{ background: '#87ceeb' }}
+      style={{ width: '100%', height: '100%', display: 'block', background: '#87ceeb' }}
     >
-      {/* Controls */}
       <OrbitControls
         target={[0, 0, 0]}
         maxPolarAngle={Math.PI / 2.1}
@@ -25,7 +24,6 @@ export default function IntersectionScene({ vehicles = [], pedestrians = [], lig
         maxDistance={300}
       />
 
-      {/* Lighting */}
       <ambientLight intensity={0.6} />
       <directionalLight
         castShadow
@@ -41,21 +39,17 @@ export default function IntersectionScene({ vehicles = [], pedestrians = [], lig
         shadow-camera-bottom={-150}
       />
 
-      {/* Scene */}
       <SceneEnvironment />
       <RoadSystem />
 
-      {/* Traffic lights */}
       {lights.map(l => (
         <TrafficLightModel key={l.id} {...l} />
       ))}
 
-      {/* Vehicles */}
       {vehicles.map(v => (
         <VehicleModel key={v.id} {...v} />
       ))}
 
-      {/* Pedestrians */}
       {pedestrians.map(p => (
         <PedestrianModel key={p.id} {...p} />
       ))}

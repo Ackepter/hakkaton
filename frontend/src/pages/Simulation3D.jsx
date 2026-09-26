@@ -1,78 +1,63 @@
 /**
- * Simulation3D page — 3D intersection viewer with controls.
- * Connects to SI microservice on port 8001 via WebSocket.
- * Falls back to HTTP polling every 500ms.
+ * Simulation3D — 3D intersection viewer.
+ * Connects to SI microservice on port 8001 via WebSocket; falls back to HTTP polling.
  */
 import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import IntersectionScene from '../components/scene/IntersectionScene'
 import SimControls from '../components/scene/SimControls'
 
-const WS_URL = 'ws://localhost:8001/ws/state'
+const WS_URL  = 'ws://localhost:8001/ws/state'
 const API_URL = 'http://localhost:8001/simulation/state'
 
 const LIGHT_COLORS = { RED: '#ef4444', YELLOW: '#fbbf24', GREEN: '#22c55e' }
 
+const NAV_H = 56  // px — must match App.jsx nav height
+
 export default function Simulation3D() {
-  const [simState, setSimState] = useState(null)
+  const [simState, setSimState]   = useState(null)
   const [connected, setConnected] = useState(false)
-  const [error, setError] = useState(null)
-  const wsRef = useRef(null)
+  const [error, setError]         = useState(null)
+  const wsRef   = useRef(null)
   const pollRef = useRef(null)
 
-  // Try WebSocket first, fall back to HTTP polling
   useEffect(() => {
-    let useWs = true
-
-    function connectWS() {
-      if (!useWs) return
-      try {
-        const ws = new WebSocket(WS_URL)
-        wsRef.current = ws
-
-        ws.onopen = () => {
-          setConnected(true)
-          setError(null)
-          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-        }
-        ws.onmessage = (e) => {
-          try { setSimState(JSON.parse(e.data)) } catch {}
-        }
-        ws.onclose = () => {
-          setConnected(false)
-          if (useWs) {
-            startPolling()
-            setTimeout(connectWS, 3000)
-          }
-        }
-        ws.onerror = () => {
-          ws.close()
-        }
-      } catch {
-        startPolling()
-      }
-    }
+    let alive = true
 
     function startPolling() {
       if (pollRef.current) return
       pollRef.current = setInterval(async () => {
         try {
           const r = await axios.get(API_URL)
-          setSimState(r.data)
-          setConnected(true)
-          setError(null)
-        } catch (e) {
-          setConnected(false)
-          setError('SI service offline — start it with: python -m uvicorn smart_intersection.main:app --port 8001')
+          if (alive) { setSimState(r.data); setConnected(true); setError(null) }
+        } catch {
+          if (alive) {
+            setConnected(false)
+            setError('SI service offline — запустите start.bat')
+          }
         }
       }, 500)
     }
 
-    connectWS()
+    function connectWS() {
+      if (!alive) return
+      try {
+        const ws = new WebSocket(WS_URL)
+        wsRef.current = ws
+        ws.onopen  = () => { if (alive) { setConnected(true); setError(null) }
+                              if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }
+        ws.onmessage = e => { try { if (alive) setSimState(JSON.parse(e.data)) } catch {} }
+        ws.onclose   = () => { if (alive) { setConnected(false); startPolling(); setTimeout(connectWS, 3000) } }
+        ws.onerror   = () => ws.close()
+      } catch {
+        startPolling()
+      }
+    }
 
+    connectWS()
     return () => {
-      useWs = false
-      if (wsRef.current) wsRef.current.close()
+      alive = false
+      wsRef.current?.close()
       if (pollRef.current) clearInterval(pollRef.current)
     }
   }, [])
@@ -85,83 +70,104 @@ export default function Simulation3D() {
   const simTime     = simState?.sim_time    ?? 0
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-950" style={{ height: 'calc(100vh - 56px)' }}>
+    <div style={{
+      display: 'flex',
+      height: `calc(100vh - ${NAV_H}px)`,
+      overflow: 'hidden',
+      background: '#0f172a',
+    }}>
 
       {/* Left panel — controls */}
-      <aside className="w-56 flex-none p-3 overflow-y-auto bg-gray-900 border-r border-gray-800">
+      <aside style={{
+        width: 200, flexShrink: 0, overflowY: 'auto',
+        background: '#111827', borderRight: '1px solid #1e293b',
+        padding: 12,
+      }}>
         <SimControls simStatus={status} metrics={metrics} />
       </aside>
 
-      {/* Center — 3D canvas */}
-      <main className="flex-1 relative">
+      {/* Centre — 3D canvas (fills all remaining space) */}
+      <main style={{ flex: 1, position: 'relative', minWidth: 0, height: '100%' }}>
         <IntersectionScene vehicles={vehicles} pedestrians={pedestrians} lights={lights} />
 
-        {/* Overlay: sim time + connection */}
-        <div className="absolute top-3 left-3 text-white text-xs bg-black/60 rounded px-2 py-1 space-y-0.5">
-          <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-500'}`} />
-            <span>{connected ? 'Connected' : 'Offline'}</span>
+        {/* HUD overlay */}
+        <div style={{
+          position: 'absolute', top: 10, left: 10,
+          background: 'rgba(0,0,0,0.65)', color: '#e2e8f0',
+          fontSize: 11, borderRadius: 6, padding: '6px 10px', lineHeight: 1.8,
+          pointerEvents: 'none',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', display: 'inline-block',
+                           background: connected ? '#4ade80' : '#f87171' }} />
+            {connected ? 'Connected' : 'Offline'}
           </div>
           <div>Sim time: {simTime.toFixed(1)}s</div>
           <div>Speed: {simState?.time_scale ?? 1}×</div>
         </div>
 
-        {/* Error banner */}
         {error && (
-          <div className="absolute bottom-3 left-3 right-3 bg-red-900/80 text-red-200 text-xs rounded p-2">
+          <div style={{
+            position: 'absolute', bottom: 10, left: 10, right: 10,
+            background: 'rgba(127,29,29,0.9)', color: '#fca5a5',
+            fontSize: 11, borderRadius: 6, padding: '6px 10px',
+          }}>
             {error}
           </div>
         )}
       </main>
 
       {/* Right panel — metrics */}
-      <aside className="w-48 flex-none p-3 overflow-y-auto bg-gray-900 border-l border-gray-800 text-white text-xs space-y-4">
-        <h3 className="font-semibold text-gray-200 text-sm">Live Metrics</h3>
+      <aside style={{
+        width: 170, flexShrink: 0, overflowY: 'auto',
+        background: '#111827', borderLeft: '1px solid #1e293b',
+        padding: 12, color: '#e2e8f0', fontSize: 11,
+      }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: '#f1f5f9' }}>
+          Live Metrics
+        </div>
 
-        {/* Traffic lights */}
-        <div>
-          <p className="text-gray-400 mb-1">Traffic Lights</p>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ color: '#64748b', marginBottom: 4 }}>Traffic Lights</div>
           {lights.map(l => (
-            <div key={l.id} className="flex items-center justify-between mb-0.5">
-              <span className="text-gray-300 capitalize">{l.direction}</span>
-              <span className="font-mono" style={{ color: LIGHT_COLORS[l.state] ?? '#888' }}>
+            <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+              <span style={{ textTransform: 'capitalize', color: '#cbd5e1' }}>{l.direction}</span>
+              <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[l.state] ?? '#888' }}>
                 {l.state}
               </span>
             </div>
           ))}
         </div>
 
-        {metrics && (
-          <div className="space-y-1">
-            <p className="text-gray-400">Performance</p>
-            <Metric label="Vehicles" value={metrics.vehicles_active} />
-            <Metric label="Waiting" value={metrics.vehicles_waiting} />
-            <Metric label="Passed" value={metrics.passed_total} />
-            <Metric label="Avg wait" value={`${metrics.avg_wait_s?.toFixed(1)}s`} />
-            <Metric label="Efficiency" value={`${metrics.efficiency_pct?.toFixed(0)}%`} />
-            <Metric label="Congestion" value={`${metrics.congestion_pct?.toFixed(0)}%`} />
-            <p className="text-gray-400 mt-2">Pedestrians</p>
-            <Metric label="Waiting" value={metrics.pedestrians_waiting} />
-            <Metric label="Crossing" value={metrics.pedestrians_crossing} />
-            <Metric label="Crossed" value={metrics.peds_crossed_total} />
+        {metrics ? (
+          <div>
+            <div style={{ color: '#64748b', marginBottom: 4 }}>Performance</div>
+            <MRow label="Vehicles"   value={metrics.vehicles_active} />
+            <MRow label="Waiting"    value={metrics.vehicles_waiting} />
+            <MRow label="Passed"     value={metrics.passed_total} />
+            <MRow label="Avg wait"   value={`${(metrics.avg_wait_s ?? 0).toFixed(1)}s`} />
+            <MRow label="Efficiency" value={`${(metrics.efficiency_pct ?? 0).toFixed(0)}%`} />
+            <MRow label="Congestion" value={`${(metrics.congestion_pct ?? 0).toFixed(0)}%`} />
+            <div style={{ color: '#64748b', marginBottom: 4, marginTop: 8 }}>Pedestrians</div>
+            <MRow label="Waiting"  value={metrics.pedestrians_waiting} />
+            <MRow label="Crossing" value={metrics.pedestrians_crossing} />
+            <MRow label="Crossed"  value={metrics.peds_crossed_total} />
           </div>
-        )}
-
-        {!simState && (
-          <p className="text-gray-500 text-center mt-8">
-            Start the SI service on port 8001
-          </p>
+        ) : (
+          <div style={{ color: '#475569', textAlign: 'center', marginTop: 24 }}>
+            Start a scenario to see metrics
+          </div>
         )}
       </aside>
     </div>
   )
 }
 
-function Metric({ label, value }) {
+function MRow({ label, value }) {
   return (
-    <div className="flex justify-between">
-      <span className="text-gray-400">{label}</span>
-      <span className="font-mono">{value ?? '—'}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+      <span style={{ color: '#94a3b8' }}>{label}</span>
+      <span style={{ fontFamily: 'monospace' }}>{value ?? '—'}</span>
     </div>
   )
 }

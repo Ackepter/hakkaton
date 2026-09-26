@@ -27,6 +27,10 @@ LANE_WIDTH = 4.0
 ARM_LENGTH = 80.0          # meters from intersection edge
 INTERSECTION_HALF = 16.0   # half-width of intersection box (4 lanes × 4m)
 STOP_LINE_OFFSET = 2.0     # meters before intersection edge
+PATH_LENGTH = 2 * ARM_LENGTH      # inbound path runs straight through the box to the far end
+CROSSWALK_CENTER = INTERSECTION_HALF + 2.5   # crosswalk band centre, meters from centre
+CROSSWALK_DEPTH = 3.0
+STOP_LINE_DIST = CROSSWALK_CENTER + CROSSWALK_DEPTH / 2 + 1.0  # front bumper must stop here (meters from centre)
 
 
 def build_world():
@@ -52,8 +56,8 @@ def _build_lanes():
             id=f"{direction}-in",
             direction=direction,
             is_inbound=True,
-            length_m=ARM_LENGTH,
-            stop_line_m=ARM_LENGTH - STOP_LINE_OFFSET,  # near the intersection edge
+            length_m=PATH_LENGTH,
+            stop_line_m=ARM_LENGTH - STOP_LINE_DIST,
             traffic_light_id=f"TL-{direction[0].upper()}",
         )
         # Outbound: vehicles leave intersection
@@ -133,8 +137,8 @@ def get_vehicle_3d_position(lane_id: str, position_m: float):
     half = LANE_WIDTH / 2 + LANE_WIDTH / 2  # center of inbound lane
 
     if direction == "north":
-        # North arm: Z decreases (toward 0)
-        z = -(ARM_LENGTH - position_m) if is_in else -(position_m + INTERSECTION_HALF)
+        # inbound: travels +Z straight through the box (position_m - ARM_LENGTH is signed distance from centre)
+        z = (position_m - ARM_LENGTH) if is_in else -(position_m + INTERSECTION_HALF)
         x = -LANE_WIDTH / 2 if is_in else LANE_WIDTH / 2
         return (x, 0.75, z)
 
@@ -149,7 +153,7 @@ def get_vehicle_3d_position(lane_id: str, position_m: float):
         return (x, 0.75, z)
 
     elif direction == "west":
-        x = -(ARM_LENGTH - position_m) if is_in else -(position_m + INTERSECTION_HALF)
+        x = (position_m - ARM_LENGTH) if is_in else -(position_m + INTERSECTION_HALF)
         z = LANE_WIDTH / 2 if is_in else -LANE_WIDTH / 2
         return (x, 0.75, z)
 

@@ -51,6 +51,9 @@ class Pedestrian:
     position_m: float = 0.0  # meters across the crossing (0 = waiting side, max = other side)
     crossing_width: float = 12.0  # meters to cross (2 lanes × 4m + median)
     speed_mps: float = 1.4   # average walking speed
+    direction: int = 1        # +1 / -1: which side of the crosswalk the pedestrian starts from
+    offset: float = 0.0       # lateral lane inside the crosswalk band (meters)
+    stand_position: float = 0.0  # where the pedestrian waits (0 = curb, negative = queued behind it)
 
 
 @dataclass

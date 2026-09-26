@@ -1,5 +1,6 @@
 /**
  * SimControls — play/pause/speed/scenario panel.
+ * Speed slider: local state updates on onChange, API call fires only on mouseUp/touchEnd.
  */
 import { useState } from 'react'
 import axios from 'axios'
@@ -7,136 +8,165 @@ import axios from 'axios'
 const SI_URL = 'http://localhost:8001'
 
 const SCENARIOS = [
-  { id: 'empty', name: 'Empty' },
-  { id: 'normal', name: 'Normal Traffic' },
-  { id: 'heavy', name: 'Heavy Traffic' },
-  { id: 'pedestrian_rush', name: 'Pedestrian Rush' },
-  { id: 'unbalanced', name: 'Unbalanced (North)' },
-  { id: 'emergency', name: 'Emergency Vehicles' },
-  { id: 'traffic_jam', name: 'Traffic Jam' },
-  { id: 'failsafe', name: 'Failsafe Mode' },
+  { id: 'empty',                  name: 'Empty' },
+  { id: 'normal',                 name: 'Normal Traffic' },
+  { id: 'heavy',                  name: 'Heavy Traffic' },
+  { id: 'pedestrian_rush',        name: 'Pedestrian Rush' },
+  { id: 'unbalanced',             name: 'Unbalanced (North)' },
+  { id: 'emergency',              name: 'Emergency Vehicles' },
+  { id: 'traffic_jam',            name: 'Traffic Jam' },
+  { id: 'failsafe',               name: 'Failsafe Mode' },
   { id: 'demo_city_intersection', name: 'Full Demo' },
 ]
 
 export default function SimControls({ simStatus, metrics }) {
   const [scenario, setScenario] = useState('normal')
   const [timeScale, setTimeScale] = useState(1)
-  const [loading, setLoading] = useState(false)
+  const [controlMode, setControlMode] = useState('auto')
 
   const call = async (method, path, body) => {
-    setLoading(true)
     try {
       await axios({ method, url: `${SI_URL}${path}`, data: body })
     } catch (e) {
-      console.error('SI API error:', e)
-    } finally {
-      setLoading(false)
+      console.error('SI API error:', e?.response?.status, path)
     }
   }
 
-  const handleStart = () => call('post', '/scenario/start', { scenario_id: scenario })
+  const handleStart = () => {
+    setControlMode(scenario === 'failsafe' ? 'failsafe' : 'auto')
+    return call('post', '/scenario/start', { scenario_id: scenario })
+  }
   const handleStop  = () => call('post', '/simulation/stop')
   const handlePause = () =>
     simStatus === 'paused'
       ? call('post', '/simulation/resume')
       : call('post', '/simulation/pause')
   const handleReset = () => call('post', '/simulation/reset')
-  const handleSpeedChange = async (val) => {
+
+  // Slider: update local display immediately, send API only on release
+  const handleSpeedRelease = (e) => {
+    const val = parseFloat(e.target.value)
     setTimeScale(val)
-    await call('post', '/simulation/config', { time_scale: parseFloat(val) })
+    call('post', '/simulation/config', { time_scale: val })
   }
 
-  const btnBase = 'px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50 transition-colors'
   const isRunning = simStatus === 'running'
-  const isPaused = simStatus === 'paused'
+  const isPaused  = simStatus === 'paused'
+
+  const btn = (extra) => `px-3 py-1.5 rounded text-sm font-medium transition-colors ${extra}`
 
   return (
-    <div className="bg-gray-900 text-white p-4 rounded-lg space-y-4 min-w-[220px]">
-      <h3 className="text-base font-semibold text-gray-200">Simulation Controls</h3>
+    <div style={{ color: '#fff', fontSize: 13 }}>
+      <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14, color: '#e2e8f0' }}>
+        Simulation Controls
+      </div>
 
       {/* Scenario picker */}
-      <div>
-        <label className="text-xs text-gray-400 block mb-1">Scenario</label>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>Scenario</div>
         <select
           value={scenario}
           onChange={e => setScenario(e.target.value)}
-          className="w-full bg-gray-800 text-white text-sm rounded px-2 py-1.5 border border-gray-700"
+          style={{
+            width: '100%', background: '#1e293b', color: '#fff',
+            border: '1px solid #334155', borderRadius: 4, padding: '4px 6px', fontSize: 12,
+          }}
         >
           {SCENARIOS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
 
       {/* Action buttons */}
-      <div className="flex flex-wrap gap-2">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
         <button
           onClick={handleStart}
-          disabled={loading || isRunning}
-          className={`${btnBase} bg-green-600 hover:bg-green-700`}
+          disabled={isRunning}
+          style={btnStyle(isRunning ? '#166534' : '#15803d')}
         >▶ Start</button>
 
         <button
           onClick={handlePause}
-          disabled={loading || (!isRunning && !isPaused)}
-          className={`${btnBase} ${isPaused ? 'bg-blue-600 hover:bg-blue-700' : 'bg-yellow-600 hover:bg-yellow-700'}`}
+          disabled={!isRunning && !isPaused}
+          style={btnStyle(isPaused ? '#1d4ed8' : '#b45309')}
         >{isPaused ? '▶ Resume' : '⏸ Pause'}</button>
 
         <button
           onClick={handleStop}
-          disabled={loading || (!isRunning && !isPaused)}
-          className={`${btnBase} bg-red-600 hover:bg-red-700`}
+          disabled={!isRunning && !isPaused}
+          style={btnStyle('#b91c1c')}
         >⏹ Stop</button>
 
         <button
           onClick={handleReset}
-          disabled={loading}
-          className={`${btnBase} bg-gray-600 hover:bg-gray-700`}
+          style={btnStyle('#374151')}
         >↺ Reset</button>
       </div>
 
-      {/* Speed */}
-      <div>
-        <label className="text-xs text-gray-400 block mb-1">Speed: {timeScale}×</label>
+      {/* Signal control mode */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>Signal control</div>
+        <select
+          value={controlMode}
+          onChange={e => { setControlMode(e.target.value); call('post', '/simulation/config', { control_mode: e.target.value }) }}
+          style={{ width: '100%', background: '#1e293b', color: '#fff', border: '1px solid #334155', borderRadius: 4, padding: '4px 6px', fontSize: 12 }}
+        >
+          <option value="auto">Adaptive (AUTO)</option>
+          <option value="failsafe">Fixed timing (FAILSAFE)</option>
+        </select>
+      </div>
+
+      {/* Speed slider */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
+          Speed: <strong style={{ color: '#fff' }}>{timeScale}×</strong>
+        </div>
         <input
           type="range" min="0.25" max="10" step="0.25"
           value={timeScale}
-          onChange={e => handleSpeedChange(e.target.value)}
-          className="w-full"
+          onChange={e => setTimeScale(parseFloat(e.target.value))}
+          onMouseUp={handleSpeedRelease}
+          onTouchEnd={handleSpeedRelease}
+          style={{ width: '100%', cursor: 'pointer' }}
         />
+        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontSize: 10 }}>
+          <span>0.25×</span><span>10×</span>
+        </div>
       </div>
 
       {/* Status */}
-      <div className="text-xs text-gray-400 space-y-1">
-        <div className="flex justify-between">
+      <div style={{ borderTop: '1px solid #1e293b', paddingTop: 8, fontSize: 11, color: '#94a3b8' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
           <span>Status</span>
-          <span className={`font-medium ${isRunning ? 'text-green-400' : isPaused ? 'text-yellow-400' : 'text-gray-500'}`}>
+          <span style={{ color: isRunning ? '#4ade80' : isPaused ? '#fbbf24' : '#64748b', fontWeight: 600 }}>
             {simStatus || 'stopped'}
           </span>
         </div>
         {metrics && (
           <>
-            <div className="flex justify-between">
-              <span>Active vehicles</span>
-              <span>{metrics.vehicles_active ?? 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Waiting</span>
-              <span>{metrics.vehicles_waiting ?? 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Passed total</span>
-              <span>{metrics.passed_total ?? 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Avg wait</span>
-              <span>{metrics.avg_wait_s?.toFixed(1) ?? 0}s</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Efficiency</span>
-              <span>{metrics.efficiency_pct?.toFixed(0) ?? 0}%</span>
-            </div>
+            <StatRow label="Active" value={metrics.vehicles_active ?? 0} />
+            <StatRow label="Waiting" value={metrics.vehicles_waiting ?? 0} />
+            <StatRow label="Passed" value={metrics.passed_total ?? 0} />
+            <StatRow label="Avg wait" value={`${(metrics.avg_wait_s ?? 0).toFixed(1)}s`} />
+            <StatRow label="Efficiency" value={`${(metrics.efficiency_pct ?? 0).toFixed(0)}%`} />
           </>
         )}
       </div>
     </div>
   )
+}
+
+function StatRow({ label, value }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+      <span>{label}</span>
+      <span style={{ fontFamily: 'monospace', color: '#cbd5e1' }}>{value}</span>
+    </div>
+  )
+}
+
+function btnStyle(bg) {
+  return {
+    background: bg, color: '#fff', border: 'none', borderRadius: 4,
+    padding: '5px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 500,
+  }
 }

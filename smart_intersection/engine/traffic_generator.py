@@ -1,8 +1,8 @@
 """
 Traffic Generator — spawns vehicles and pedestrians with configurable rates.
 """
+import math
 import random
-import time
 from typing import Dict
 from .models import Vehicle, Pedestrian, VEHICLE_DEFAULTS
 
@@ -43,8 +43,7 @@ class SpawnManager:
         self._rng = rng or random.Random()
         self._vehicle_counter = 0
         self._ped_counter = 0
-        self._last_spawn_time = 0.0
-        self._last_ped_spawn_time = 0.0
+        self._crossing_counts: Dict[str, int] = {}
 
     def try_spawn_vehicles(self, sim_time: float, dt: float):
         """
@@ -69,13 +68,17 @@ class SpawnManager:
                 break
             crossing_id = self._rng.choice(crossings)
             self._ped_counter += 1
+            n = self._crossing_counts.get(crossing_id, 0)
+            self._crossing_counts[crossing_id] = n + 1
+            # alternate sides; the engine assigns the exact lane / queue slot
             p = Pedestrian(
                 id=f"ped-{self._ped_counter:04d}",
                 crossing_id=crossing_id,
                 state="walking_to_crossing",
                 spawn_time=sim_time,
                 wait_time=0.0,
-                position_m=0.0,
+                position_m=-2.5,
+                direction=1 if n % 2 == 0 else -1,
             )
             peds.append(p)
         return peds
@@ -121,8 +124,8 @@ class SpawnManager:
         """Approximate Poisson sample."""
         if lam <= 0:
             return 0
-        # For small lambda use direct method
-        L = 2.718281828 ** (-lam)
+        lam = min(lam, 30.0)
+        L = math.exp(-lam)
         k = 0
         p = 1.0
         while p > L:

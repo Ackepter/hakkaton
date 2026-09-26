@@ -4,8 +4,8 @@ All state lives in the global engine singleton.
 """
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from ..engine.simulation import SimulationEngine
@@ -33,10 +33,11 @@ def _get_engine() -> SimulationEngine:
 # ──────────────────── Simulation control ────────────────────
 
 class SimConfig(BaseModel):
-    spawn_rate: Optional[float] = None
-    ped_spawn_rate: Optional[float] = None
-    time_scale: Optional[float] = None
+    spawn_rate: Optional[float] = Field(None, ge=0, le=200)
+    ped_spawn_rate: Optional[float] = Field(None, ge=0, le=200)
+    time_scale: Optional[float] = Field(None, ge=0.1, le=20)
     scenario: Optional[str] = None
+    control_mode: Optional[str] = Field(None, pattern="^(auto|failsafe)$")
 
 
 @router.post("/simulation/start")
@@ -68,7 +69,7 @@ async def resume_simulation():
 
 
 @router.post("/simulation/reset")
-async def reset_simulation(seed: int = 42):
+async def reset_simulation(seed: int = Query(42, ge=0)):
     engine = _get_engine()
     await engine.reset(seed=seed)
     return {"status": engine.status, "seed": engine.seed}
@@ -86,6 +87,7 @@ async def get_config():
         "spawn_rate": engine._spawn.spawn_rate,
         "ped_spawn_rate": engine._spawn.ped_spawn_rate,
         "time_scale": engine.time_scale,
+        "control_mode": engine.control_mode,
         "tick_rate": engine.tick_rate,
         "scenario": engine.scenario,
         "seed": engine.seed,
@@ -115,10 +117,11 @@ async def get_lights():
 @router.post("/traffic-lights/{light_id}/state")
 async def set_light_state(light_id: str, cmd: LightCommand):
     engine = _get_engine()
-    valid = {"RED", "YELLOW", "GREEN"}
+    valid = {"RED", "YELLOW", "GREEN", "AUTO"}
     if cmd.state not in valid:
-        raise HTTPException(status_code=422, detail=f"state must be one of {valid}")
-    engine.set_light_state(light_id, cmd.state)
+        raise HTTPException(status_code=422, detail=f"state must be one of {sorted(valid)}")
+    if not engine.set_light_state(light_id, cmd.state):
+        raise HTTPException(status_code=404, detail=f"Unknown traffic light {light_id!r}")
     return {"light_id": light_id, "state": cmd.state}
 
 
@@ -153,14 +156,11 @@ async def start_scenario(req: ScenarioRequest):
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    await engine.reset()
-    # Remove internal metadata keys
-    cfg.pop("_notes", None)
-    cfg.pop("_timeline", None)
+    await engine.reset(seed=engine.seed)
     cfg.pop("name", None)
     cfg.pop("description", None)
-
-    engine.configure(**cfg, scenario=req.scenario_id)
+    cfg["scenario"] = req.scenario_id
+    engine.configure(**cfg)
     await engine.start()
     return {"scenario": req.scenario_id, "status": engine.status}
 
@@ -179,7 +179,7 @@ async def list_scenarios():
 
 # ──────────────────── XML export ────────────────────
 
-@router.get("/xml/state", response_class=None)
+@router.get("/xml/state")
 async def get_xml_state():
     from fastapi.responses import Response
     state = _get_engine().get_state()
@@ -204,6 +204,7 @@ async def health():
 # ──────────────────── WebSocket ────────────────────
 
 _ws_clients: list = []
+WS_INTERVAL_S = 0.1   # matches the engine tick rate so the 3D view can interpolate smoothly
 
 
 @router.websocket("/ws/state")
@@ -213,16 +214,11 @@ async def websocket_state(websocket: WebSocket):
     logger.info("WS client connected (%d total)", len(_ws_clients))
     try:
         while True:
-            await asyncio.sleep(0.5)
-            engine = _engine
-            if engine is None:
+            await asyncio.sleep(WS_INTERVAL_S)
+            if _engine is None:
                 continue
-            state = engine.get_state()
-            try:
-                await websocket.send_json(state)
-            except Exception:
-                break
-    except WebSocketDisconnect:
+            await websocket.send_json(_engine.get_state())
+    except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
         if websocket in _ws_clients:

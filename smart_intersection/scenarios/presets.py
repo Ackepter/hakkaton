@@ -56,7 +56,7 @@ SCENARIOS = {
         "ped_spawn_rate": 3.0,
         "time_scale": 1.0,
         "direction_probs": {"north": 0.25, "south": 0.25, "east": 0.25, "west": 0.25},
-        "type_probs": {"car": 0.50, "truck": 0.05, "bus": 0.05, "tram": 0.02, "emergency": 0.38},
+        "type_probs": {"car": 0.73, "truck": 0.07, "bus": 0.08, "tram": 0.02, "emergency": 0.10},
     },
     "traffic_jam": {
         "name": "Traffic Jam",
@@ -75,7 +75,7 @@ SCENARIOS = {
         "time_scale": 1.0,
         "direction_probs": {"north": 0.25, "south": 0.25, "east": 0.25, "west": 0.25},
         "type_probs": {"car": 0.75, "truck": 0.10, "bus": 0.10, "tram": 0.04, "emergency": 0.01},
-        "_notes": "Triggers FAILSAFE mode on the main controller",
+        "control_mode": "failsafe",   # detectors are down: fixed-time signal plan, no adaptation
     },
     "demo_city_intersection": {
         "name": "Full Demo — City Intersection",
@@ -85,7 +85,7 @@ SCENARIOS = {
         "time_scale": 2.0,           # 2× speed for demo
         "direction_probs": {"north": 0.25, "south": 0.25, "east": 0.25, "west": 0.25},
         "type_probs": {"car": 0.75, "truck": 0.10, "bus": 0.10, "tram": 0.04, "emergency": 0.01},
-        "_timeline": [
+        "timeline": [
             {"at_sim_s": 0,   "spawn_rate": 5.0,  "ped_spawn_rate": 2.0},
             {"at_sim_s": 20,  "spawn_rate": 12.0, "ped_spawn_rate": 5.0},
             {"at_sim_s": 60,  "spawn_rate": 25.0, "direction_probs": {"north": 0.60, "south": 0.15, "east": 0.15, "west": 0.10}},
@@ -101,4 +101,5 @@ def get_scenario(scenario_id: str) -> dict:
     """Return scenario config dict, raises KeyError if not found."""
     if scenario_id not in SCENARIOS:
         raise KeyError(f"Unknown scenario: {scenario_id!r}. Available: {list(SCENARIOS.keys())}")
-    return SCENARIOS[scenario_id].copy()
+    import copy
+    return copy.deepcopy(SCENARIOS[scenario_id])

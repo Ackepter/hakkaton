@@ -1,67 +1,100 @@
 """
-SimulationEngine — main asyncio tick loop for the Smart Intersection.
-Deterministic with seed=42 by default.
+SimulationEngine — physical simulation of a 4-way signalised intersection.
+
+* deterministic for a given seed (all randomness goes through one random.Random)
+* physics runs in fixed sub-steps (<= MAX_SUBSTEP) so high time_scale never breaks car following
+* signal phases: 0 NS green | 1 NS yellow | 2 all-red | 3 EW green | 4 EW yellow | 5 all-red
+* control_mode "auto": adaptive green (demand, pedestrian and emergency aware); "failsafe": fixed timing
 """
 import asyncio
+import math
 import random
 import time
 import logging
 from typing import Dict, List, Optional
 
 from .models import Vehicle, Pedestrian, SimTrafficLight
-from .world import build_world
-from .behaviors import update_vehicle, update_pedestrian
+from .world import build_world, ARM_LENGTH, STOP_LINE_DIST
+from .behaviors import update_vehicle, update_pedestrian, MIN_GAP_M
 from .traffic_generator import SpawnManager
 from .metrics import MetricsEngine
 
 logger = logging.getLogger(__name__)
 
-# Phase timing constants (seconds of sim time)
-NS_GREEN_DURATION = 30.0
-NS_YELLOW_DURATION = 3.0
-EW_GREEN_DURATION = 30.0
-EW_YELLOW_DURATION = 3.0
+BASE_GREEN = 30.0
+MIN_GREEN = 8.0
+MAX_GREEN = 60.0
+FAILSAFE_GREEN = 20.0
+YELLOW_S = 3.0
+ALL_RED_S = 3.0          # minimum all-red clearance
+MAX_ALL_RED_S = 12.0     # hard cap while waiting for the box to clear
+EMERGENCY_MIN_GREEN = 5.0
+EMERGENCY_LOOKAHEAD_M = 60.0
+DEMAND_LOOKAHEAD_M = 40.0
+PED_MARGIN_S = 1.0
+PED_LANES = {1: (-1.2, -0.75, -0.3), -1: (0.3, 0.75, 1.2)}   # opposite directions never share a lateral lane
+PED_QUEUE_SPACING_M = 0.5
+MAX_SUBSTEP = 0.1
+MAX_QUEUE = 20
+MIN_TIME_SCALE = 0.1
+MAX_TIME_SCALE = 20.0
 
-# Phase sequence: (ns_state, ew_state, duration)
+# (ns_state, ew_state, nominal_duration)
 PHASES = [
-    ("GREEN",  "RED",    NS_GREEN_DURATION),
-    ("YELLOW", "RED",    NS_YELLOW_DURATION),
-    ("RED",    "GREEN",  EW_GREEN_DURATION),
-    ("RED",    "YELLOW", EW_YELLOW_DURATION),
+    ("GREEN",  "RED",    BASE_GREEN),
+    ("YELLOW", "RED",    YELLOW_S),
+    ("RED",    "RED",    ALL_RED_S),
+    ("RED",    "GREEN",  BASE_GREEN),
+    ("RED",    "YELLOW", YELLOW_S),
+    ("RED",    "RED",    ALL_RED_S),
 ]
+GREEN_PHASE = {"ns": 0, "ew": 3}
+GROUP_DIRS = {"ns": ("north", "south"), "ew": ("east", "west")}
+OTHER = {"ns": "ew", "ew": "ns"}
+CONTROL_MODES = ("auto", "failsafe")
+
+
+def _group_of(direction: str) -> str:
+    return "ns" if direction in ("north", "south") else "ew"
 
 
 class SimulationEngine:
     def __init__(self, seed: int = 42, tick_rate: float = 10.0):
         self.seed = seed
-        self.tick_rate = tick_rate        # ticks per real second
-        self.time_scale = 1.0             # simulation speed multiplier
-        self._rng = random.Random(seed)
-
-        self.sim_time: float = 0.0
-        self.status: str = "stopped"      # stopped/running/paused
-        self.scenario: str = "normal"
-        self.intersection_id: str = "SI-001"
-
-        self._vehicles: Dict[str, Vehicle] = {}
-        self._pedestrians: Dict[str, Pedestrian] = {}
-
-        self._lanes, self._lights, self._crossings = build_world()
-        self._phase_index: int = 0
-        self._phase_elapsed: float = 0.0
-
-        self._spawn = SpawnManager(rng=self._rng)
-        self._metrics = MetricsEngine()
+        self.tick_rate = tick_rate
+        self.time_scale = 1.0
+        self.control_mode = "auto"
+        self.sim_time = 0.0
+        self.status = "stopped"      # stopped / running / paused
+        self.scenario = "normal"
+        self.intersection_id = "SI-001"
 
         self._task: Optional[asyncio.Task] = None
-        self._lock = asyncio.Lock()
+        self._init_world()
+
+    def _init_world(self):
+        self._rng = random.Random(self.seed)
+        self._vehicles: Dict[str, Vehicle] = {}
+        self._pedestrians: Dict[str, Pedestrian] = {}
+        self._lanes, self._lights, self._crossings = build_world()
+        self._phase_index = 0
+        self._phase_elapsed = 0.0
+        self._overrides: Dict[str, str] = {}
+        self._timeline: List[dict] = []
+        self._timeline_idx = 0
+        self._spawn = SpawnManager(rng=self._rng)
+        self._metrics = MetricsEngine()
         self._newly_passed = 0
         self._newly_crossed = 0
+        self._finished_waits: List[float] = []
+        self.sim_time = 0.0
 
     # ------------------------------------------------------------------ public
 
     async def start(self):
-        if self.status == "running":
+        """Start, or resume when paused. Never creates a second loop."""
+        if self._task is not None and not self._task.done():
+            self.status = "running"
             return
         self.status = "running"
         self._task = asyncio.create_task(self._loop())
@@ -69,16 +102,17 @@ class SimulationEngine:
 
     async def stop(self):
         self.status = "stopped"
-        if self._task:
-            self._task.cancel()
+        task, self._task = self._task, None
+        if task:
+            task.cancel()
             try:
-                await self._task
+                await task
             except asyncio.CancelledError:
                 pass
-        logger.info("SimulationEngine stopped")
 
     async def pause(self):
-        self.status = "paused"
+        if self.status == "running":
+            self.status = "paused"
 
     async def resume(self):
         if self.status == "paused":
@@ -88,46 +122,56 @@ class SimulationEngine:
         await self.stop()
         if seed is not None:
             self.seed = seed
-        self._rng = random.Random(self.seed)
-        self.sim_time = 0.0
-        self._vehicles.clear()
-        self._pedestrians.clear()
-        self._lanes, self._lights, self._crossings = build_world()
-        self._phase_index = 0
-        self._phase_elapsed = 0.0
-        self._spawn = SpawnManager(rng=self._rng)
-        self._metrics.reset()
-        self._newly_passed = 0
-        self._newly_crossed = 0
-        self.status = "stopped"
+        self.control_mode = "auto"
+        self.time_scale = 1.0
+        self._init_world()
 
     def configure(self, **kwargs):
-        """Update spawn rates or time_scale."""
-        if "time_scale" in kwargs:
-            self.time_scale = float(kwargs["time_scale"])
-        if "scenario" in kwargs:
+        """Apply scenario / runtime settings. Unknown keys are ignored."""
+        if "time_scale" in kwargs and kwargs["time_scale"] is not None:
+            self.time_scale = max(MIN_TIME_SCALE, min(MAX_TIME_SCALE, float(kwargs["time_scale"])))
+        if kwargs.get("scenario") is not None:
             self.scenario = kwargs["scenario"]
+        if kwargs.get("control_mode") is not None:
+            if kwargs["control_mode"] not in CONTROL_MODES:
+                raise ValueError(f"control_mode must be one of {CONTROL_MODES}")
+            self.control_mode = kwargs["control_mode"]
         spawn_kwargs = {k: v for k, v in kwargs.items()
-                       if k in ("spawn_rate", "ped_spawn_rate", "type_probs", "direction_probs")}
+                        if k in ("spawn_rate", "ped_spawn_rate", "type_probs", "direction_probs") and v is not None}
         if spawn_kwargs:
             self._spawn.update_config(**spawn_kwargs)
+        timeline = kwargs.get("timeline", kwargs.get("_timeline"))
+        if timeline is not None:
+            self._timeline = sorted(timeline, key=lambda e: e["at_sim_s"])
+            self._timeline_idx = 0
 
-    def set_light_state(self, light_id: str, state: str):
-        """Manual override of a traffic light."""
-        if light_id in self._lights:
+    def set_light_state(self, light_id: str, state: str) -> bool:
+        """Manual override. state 'AUTO' releases it. Returns False for an unknown light."""
+        if light_id not in self._lights:
+            return False
+        if state == "AUTO":
+            self._overrides.pop(light_id, None)
+        else:
+            self._overrides[light_id] = state
             self._lights[light_id].state = state
+        return True
+
+    def clear_overrides(self):
+        self._overrides.clear()
+
+    def spawn_emergency(self, direction: str = "north") -> Optional[Vehicle]:
+        v = self._spawn.add_emergency_vehicle(self.sim_time, direction)
+        if self._try_place(v):
+            return v
+        return None
+
+    def advance(self, sim_seconds: float, dt: float = MAX_SUBSTEP):
+        """Headless deterministic stepping (used by tests and scripts)."""
+        steps = max(1, int(round(sim_seconds / dt)))
+        for _ in range(steps):
+            self._tick(dt)
 
     def get_state(self) -> dict:
-        """Serializable snapshot for XML export and API."""
-        vehicles = [_vehicle_to_dict(v) for v in self._vehicles.values()]
-        pedestrians = [_ped_to_dict(p) for p in self._pedestrians.values()]
-        lights = [_light_to_dict(l) for l in self._lights.values()]
-        metrics = self._metrics.get_summary() or {
-            "sim_time": self.sim_time,
-            "vehicles_active": len(self._vehicles),
-            "vehicles_waiting": 0,
-            "passed_total": 0,
-        }
         return {
             "sim_time": round(self.sim_time, 3),
             "real_time": round(time.time(), 3),
@@ -135,109 +179,45 @@ class SimulationEngine:
             "status": self.status,
             "scenario": self.scenario,
             "intersection_id": self.intersection_id,
-            "vehicles": vehicles,
-            "pedestrians": pedestrians,
-            "lights": lights,
-            "metrics": metrics,
+            "control_mode": self.control_mode,
+            "phase": {"index": self._phase_index, "elapsed": round(self._phase_elapsed, 2)},
+            "vehicles": [_vehicle_to_dict(v) for v in self._vehicles.values()],
+            "pedestrians": [_ped_to_dict(p) for p in self._pedestrians.values()],
+            "lights": [_light_to_dict(l) for l in self._lights.values()],
+            "metrics": self._metrics.get_summary() or MetricsEngine.empty_snapshot(),
             "seed": self.seed,
         }
 
     # ---------------------------------------------------------------- internals
 
     async def _loop(self):
-        dt_real = 1.0 / self.tick_rate
-        while self.status in ("running", "paused"):
-            await asyncio.sleep(dt_real)
+        last = time.monotonic()
+        interval = 1.0 / self.tick_rate
+        while True:
+            await asyncio.sleep(interval)
+            now = time.monotonic()
+            real_dt = min(now - last, 0.5)
+            last = now
             if self.status != "running":
                 continue
-            async with self._lock:
-                dt_sim = dt_real * self.time_scale
-                self._tick(dt_sim)
+            total = real_dt * self.time_scale
+            n = max(1, math.ceil(total / MAX_SUBSTEP))
+            for _ in range(n):
+                self._tick(total / n)
 
     def _tick(self, dt: float):
         self.sim_time += dt
         self._newly_passed = 0
         self._newly_crossed = 0
+        self._finished_waits = []
 
-        # 1. Advance traffic lights (phase FSM)
-        self._phase_elapsed += dt
-        ns_state, ew_state, phase_dur = PHASES[self._phase_index]
-        if self._phase_elapsed >= phase_dur:
-            self._phase_elapsed -= phase_dur
-            self._phase_index = (self._phase_index + 1) % len(PHASES)
-            ns_state, ew_state, phase_dur = PHASES[self._phase_index]
-            # record phase switch
-            for lid, light in self._lights.items():
-                light.phase_switches += 1
+        self._apply_timeline()
+        self._advance_phase(dt)
+        self._apply_lights()
+        self._spawn_traffic(dt)
+        self._update_vehicles(dt)
+        self._update_pedestrians(dt)
 
-        for lid, light in self._lights.items():
-            if light.direction in ("north", "south"):
-                light.state = ns_state
-            else:
-                light.state = ew_state
-
-        # 2. Spawn new vehicles
-        new_vehicles = self._spawn.try_spawn_vehicles(self.sim_time, dt)
-        for v in new_vehicles:
-            # Reject if lane has too many (max 20 waiting)
-            lane_count = sum(1 for x in self._vehicles.values()
-                             if x.lane_id == v.lane_id and x.state == "waiting")
-            if lane_count < 20:
-                self._vehicles[v.id] = v
-
-        # 3. Spawn pedestrians
-        crossing_ids = list(self._crossings.keys())
-        new_peds = self._spawn.try_spawn_pedestrians(self.sim_time, dt, crossing_ids)
-        for p in new_peds:
-            self._pedestrians[p.id] = p
-
-        # 4. Update vehicles
-        to_remove_v = []
-        for vid, vehicle in self._vehicles.items():
-            lane = self._lanes.get(vehicle.lane_id)
-            if not lane:
-                to_remove_v.append(vid)
-                continue
-            light = self._lights.get(lane.traffic_light_id)
-            light_state = light.state if light else "GREEN"
-            # vehicles ahead (same lane, closer to stop line)
-            ahead = [v for v in self._vehicles.values()
-                     if v.lane_id == vehicle.lane_id
-                     and v.id != vehicle.id
-                     and v.position_m > vehicle.position_m]
-            result = update_vehicle(vehicle, dt, lane, light_state, ahead)
-            if result == "finished":
-                to_remove_v.append(vid)
-                self._newly_passed += 1
-
-        for vid in to_remove_v:
-            self._vehicles.pop(vid, None)
-
-        # 5. Update pedestrians
-        to_remove_p = []
-        for pid, ped in self._pedestrians.items():
-            crossing = self._crossings.get(ped.crossing_id)
-            if not crossing:
-                to_remove_p.append(pid)
-                continue
-            light = self._lights.get(crossing.traffic_light_id)
-            # Pedestrians get GREEN when perpendicular traffic is RED
-            # i.e., NS crossings when EW is green, and vice versa
-            light_dir = crossing.direction
-            if light_dir in ("north", "south"):
-                ped_signal = "GREEN" if PHASES[self._phase_index][1] == "GREEN" else "RED"
-            else:
-                ped_signal = "GREEN" if PHASES[self._phase_index][0] == "GREEN" else "RED"
-
-            result = update_pedestrian(ped, dt, ped_signal)
-            if result == "finished":
-                to_remove_p.append(pid)
-                self._newly_crossed += 1
-
-        for pid in to_remove_p:
-            self._pedestrians.pop(pid, None)
-
-        # 6. Update metrics
         self._metrics.update(
             sim_time=self.sim_time,
             vehicles=list(self._vehicles.values()),
@@ -246,7 +226,195 @@ class SimulationEngine:
             lanes=self._lanes,
             newly_passed=self._newly_passed,
             newly_crossed=self._newly_crossed,
+            finished_waits=self._finished_waits,
         )
+
+    # --- scenario timeline
+
+    def _apply_timeline(self):
+        while self._timeline_idx < len(self._timeline) and self._timeline[self._timeline_idx]["at_sim_s"] <= self.sim_time:
+            entry = self._timeline[self._timeline_idx]
+            self._timeline_idx += 1
+            self.configure(**{k: v for k, v in entry.items() if k not in ("at_sim_s", "timeline", "_timeline")})
+
+    # --- signal control
+
+    def _advance_phase(self, dt: float):
+        self._phase_elapsed += dt
+        if self._should_end_phase():
+            self._phase_index = (self._phase_index + 1) % len(PHASES)
+            self._phase_elapsed = 0.0
+            for light in self._lights.values():
+                light.phase_switches += 1
+                light.phase_index = self._phase_index
+                light.phase_start_time = self.sim_time
+
+    def _should_end_phase(self) -> bool:
+        idx, elapsed = self._phase_index, self._phase_elapsed
+        if idx in (1, 4):
+            return elapsed >= YELLOW_S
+        if idx in (2, 5):
+            leaving = "ns" if idx == 2 else "ew"
+            return elapsed >= MAX_ALL_RED_S or (elapsed >= ALL_RED_S and not self._group_in_conflict_zone(leaving))
+        if self.control_mode == "failsafe":
+            return elapsed >= FAILSAFE_GREEN
+        group = "ns" if idx == 0 else "ew"
+        if elapsed >= MAX_GREEN:
+            return True
+        if self._peds_crossing_for(group):
+            return False
+        emerg_here, emerg_other = self._emergency_demand(group), self._emergency_demand(OTHER[group])
+        if emerg_here:
+            return False
+        if emerg_other and elapsed >= EMERGENCY_MIN_GREEN:
+            return True
+        cur, other = self._demand(group), self._demand(OTHER[group])
+        if elapsed >= MIN_GREEN and cur == 0 and other > 0:
+            return True
+        if elapsed >= BASE_GREEN and other > 0:
+            return True
+        return False
+
+    def _group_in_conflict_zone(self, group: str) -> bool:
+        """True while a vehicle of `group` still occupies the box or the far crosswalk."""
+        far_edge = ARM_LENGTH + STOP_LINE_DIST
+        for v in self._vehicles.values():
+            if _group_of(v.direction) != group:
+                continue
+            crossed = self._dist_to_stop(v) < 0
+            if crossed and v.position_m - v.length_m / 2 < far_edge:
+                return True
+        return False
+
+    def _dist_to_stop(self, v: Vehicle) -> float:
+        lane = self._lanes[v.lane_id]
+        return lane.stop_line_m - (v.position_m + v.length_m / 2)
+
+    def _demand(self, group: str) -> int:
+        """Vehicles queued/approaching on the group's arms plus pedestrians that need its green."""
+        n = 0
+        for v in self._vehicles.values():
+            if _group_of(v.direction) != group:
+                continue
+            d = self._dist_to_stop(v)
+            if v.state == "waiting" or -0.5 < d < DEMAND_LOOKAHEAD_M:
+                n += 1
+        for p in self._pedestrians.values():
+            if p.state == "waiting_for_green" and self._crossing_needs(p.crossing_id) == group:
+                n += 1
+        return n
+
+    def _emergency_demand(self, group: str) -> bool:
+        for v in self._vehicles.values():
+            if v.vehicle_type == "emergency" and _group_of(v.direction) == group:
+                if -0.5 < self._dist_to_stop(v) < EMERGENCY_LOOKAHEAD_M:
+                    return True
+        return False
+
+    def _crossing_needs(self, crossing_id: str) -> str:
+        """A crosswalk on an arm can be used while the OTHER group has green."""
+        return OTHER[_group_of(self._crossings[crossing_id].direction)]
+
+    def _peds_crossing_for(self, group: str) -> bool:
+        return any(p.state == "crossing" and self._crossing_needs(p.crossing_id) == group
+                   for p in self._pedestrians.values())
+
+    def _apply_lights(self):
+        ns_state, ew_state, _ = PHASES[self._phase_index]
+        for lid, light in self._lights.items():
+            if lid in self._overrides:
+                light.state = self._overrides[lid]
+            else:
+                light.state = ns_state if _group_of(light.direction) == "ns" else ew_state
+            light.phase_index = self._phase_index
+            light.phase_duration = PHASES[self._phase_index][2]
+
+    # --- traffic
+
+    def _spawn_traffic(self, dt: float):
+        for v in self._spawn.try_spawn_vehicles(self.sim_time, dt):
+            self._try_place(v)
+        for p in self._spawn.try_spawn_pedestrians(self.sim_time, dt, list(self._crossings.keys())):
+            self._assign_ped_slot(p)
+            self._pedestrians[p.id] = p
+
+    def _assign_ped_slot(self, p: Pedestrian):
+        """Pick the emptiest lateral lane on the pedestrian's side and queue behind whoever is already there."""
+        queued = [q for q in self._pedestrians.values()
+                  if q.crossing_id == p.crossing_id and q.direction == p.direction
+                  and q.state in ("walking_to_crossing", "waiting_for_green")]
+        offset = min(PED_LANES[p.direction], key=lambda o: sum(1 for q in queued if q.offset == o))
+        p.offset = offset
+        p.stand_position = -PED_QUEUE_SPACING_M * sum(1 for q in queued if q.offset == offset)
+        p.position_m = p.stand_position - 2.5
+
+    def _try_place(self, v: Vehicle) -> bool:
+        """Insert a new vehicle only if the entry point is free; adapt its speed to the leader."""
+        lane_vs = [x for x in self._vehicles.values() if x.lane_id == v.lane_id]
+        if sum(1 for x in lane_vs if x.state == "waiting") >= MAX_QUEUE:
+            return False
+        gap = None
+        for x in lane_vs:
+            g = (x.position_m - x.length_m / 2) - (v.position_m + v.length_m / 2)
+            if gap is None or g < gap:
+                gap = g
+        if gap is not None:
+            if gap < MIN_GAP_M + 2.0:
+                return False
+            v.speed_mps = min(v.speed_mps, 0.9 * math.sqrt(2 * 0.7 * v.decel * (gap - MIN_GAP_M)))
+        self._vehicles[v.id] = v
+        return True
+
+    def _crossing_occupied(self, direction: str) -> bool:
+        cid = f"PC-{direction[0].upper()}"
+        return any(p.crossing_id == cid and p.state == "crossing" for p in self._pedestrians.values())
+
+    def _update_vehicles(self, dt: float):
+        finished = []
+        by_lane: Dict[str, List[Vehicle]] = {}
+        for v in self._vehicles.values():
+            by_lane.setdefault(v.lane_id, []).append(v)
+        for lane_id, vs in by_lane.items():
+            lane = self._lanes.get(lane_id)
+            if lane is None:
+                finished.extend(v.id for v in vs)
+                continue
+            light = self._lights.get(lane.traffic_light_id)
+            light_state = light.state if light else "GREEN"
+            if light_state == "GREEN" and self._crossing_occupied(lane.direction):
+                light_state = "RED"
+            # leaders first, so each follower sees the leader's already-updated position
+            vs.sort(key=lambda x: -x.position_m)
+            done = []
+            for v in vs:
+                if update_vehicle(v, dt, lane, light_state, done) == "finished":
+                    finished.append(v.id)
+                    self._newly_passed += 1
+                    self._finished_waits.append(v.wait_time)
+                else:
+                    done.append(v)
+        for vid in finished:
+            self._vehicles.pop(vid, None)
+
+    def _ped_signal(self, crossing_id: str) -> str:
+        if self._overrides:
+            return "RED"
+        need = self._crossing_needs(crossing_id)
+        if self._phase_index != GREEN_PHASE[need]:
+            return "RED"
+        limit = FAILSAFE_GREEN if self.control_mode == "failsafe" else MAX_GREEN
+        crossing_time = 12.0 / 1.4 + PED_MARGIN_S
+        return "GREEN" if self._phase_elapsed + crossing_time <= limit else "RED"
+
+    def _update_pedestrians(self, dt: float):
+        finished = []
+        signals = {cid: self._ped_signal(cid) for cid in self._crossings}
+        for pid, ped in self._pedestrians.items():
+            if update_pedestrian(ped, dt, signals.get(ped.crossing_id, "RED")) == "finished":
+                finished.append(pid)
+                self._newly_crossed += 1
+        for pid in finished:
+            self._pedestrians.pop(pid, None)
 
 
 # ---------- serialization helpers ----------
@@ -272,6 +440,8 @@ def _ped_to_dict(p: Pedestrian) -> dict:
         "state": p.state,
         "position_m": round(p.position_m, 2),
         "wait_time": round(p.wait_time, 2),
+        "direction": p.direction,
+        "offset": p.offset,
     }
 
 

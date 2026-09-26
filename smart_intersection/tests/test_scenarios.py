@@ -1,158 +1,124 @@
 """
-Scenario tests 1–9 — all with seed=42 for determinism.
-Each test runs N simulated seconds and checks expected outcomes.
+Scenario tests — headless and deterministic (seed=42): each scenario must produce its characteristic behaviour.
 """
 import pytest
-import asyncio
 
-from smart_intersection.engine.simulation import SimulationEngine
-from smart_intersection.scenarios.presets import get_scenario, SCENARIOS
-
-
-def _run_sim(scenario_id: str, sim_seconds: float, time_scale: float = 10.0):
-    """Helper: run engine synchronously for sim_seconds of sim time."""
-    engine = SimulationEngine(seed=42, tick_rate=100.0)
-    cfg = get_scenario(scenario_id)
-    cfg.pop("_notes", None)
-    cfg.pop("_timeline", None)
-    cfg.pop("name", None)
-    cfg.pop("description", None)
-    cfg["time_scale"] = time_scale
-
-    async def _run():
-        engine.configure(**cfg)
-        await engine.start()
-        # Run until sim_time >= target
-        for _ in range(int(sim_seconds * 100 / time_scale) + 20):
-            await asyncio.sleep(0.01)
-            if engine.sim_time >= sim_seconds:
-                break
-        await engine.stop()
-        return engine.get_state()
-
-    return asyncio.run(_run()), engine
+from smart_intersection.scenarios.presets import SCENARIOS, get_scenario
+from .helpers import make_engine
 
 
-# ──── Test 1: Empty scenario — no vehicles spawned ────
-
-def test_scenario_01_empty_no_vehicles():
-    state, engine = _run_sim("empty", sim_seconds=30.0)
-    assert state["metrics"].get("passed_total", 0) == 0
-    assert len(state["vehicles"]) == 0
-
-
-# ──── Test 2: Normal scenario — vehicles are spawned ────
-
-def test_scenario_02_normal_spawns_vehicles():
-    state, engine = _run_sim("normal", sim_seconds=60.0)
-    total = state["metrics"].get("passed_total", 0) + len(state["vehicles"])
-    assert total > 0
+def run(e, seconds, on_tick=None, dt=0.1):
+    for _ in range(int(seconds / dt)):
+        e._tick(dt)
+        if on_tick:
+            on_tick(e)
+    return e.get_state()["metrics"]
 
 
-# ──── Test 3: Heavy traffic — more vehicles than normal ────
-
-def test_scenario_03_heavy_more_than_normal():
-    state_heavy, _ = _run_sim("heavy", sim_seconds=60.0)
-    state_normal, _ = _run_sim("normal", sim_seconds=60.0)
-    heavy_total = state_heavy["metrics"].get("passed_total", 0) + len(state_heavy["vehicles"])
-    normal_total = state_normal["metrics"].get("passed_total", 0) + len(state_normal["vehicles"])
-    assert heavy_total >= normal_total
-
-
-# ──── Test 4: Pedestrian rush — peds are active ────
-
-def test_scenario_04_pedestrian_rush_has_peds():
-    state, engine = _run_sim("pedestrian_rush", sim_seconds=30.0)
-    crossed = state["metrics"].get("peds_crossed_total", 0)
-    active = len(state["pedestrians"])
-    assert crossed + active > 0
+def test_01_empty_intersection_has_no_traffic_at_all():
+    e = make_engine("empty")
+    seen = []
+    m = run(e, 120, lambda e: seen.append(len(e._vehicles) + len(e._pedestrians)))
+    assert max(seen) == 0
+    assert m["passed_total"] == 0 and m["peds_crossed_total"] == 0
+    assert m["efficiency_pct"] == 100.0
 
 
-# ──── Test 5: Unbalanced scenario — north direction dominates ────
-
-def test_scenario_05_unbalanced_north_dominant():
-    engine = SimulationEngine(seed=42, tick_rate=100.0)
-    cfg = get_scenario("unbalanced")
-    cfg.pop("_notes", None)
-    cfg.pop("_timeline", None)
-    cfg.pop("name", None)
-    cfg.pop("description", None)
-    cfg["time_scale"] = 10.0
-
-    async def _run():
-        engine.configure(**cfg)
-        await engine.start()
-        for _ in range(200):
-            await asyncio.sleep(0.01)
-            if engine.sim_time >= 60.0:
-                break
-        await engine.stop()
-
-    asyncio.run(_run())
-
-    north_count = sum(1 for v in engine._vehicles.values() if v.direction == "north")
-    total = len(engine._vehicles) or 1
-    # With 70% north bias, expect >40% of active vehicles from north
-    assert north_count / total >= 0.30 or engine._metrics.get_summary().get("passed_total", 0) > 0
+def test_02_normal_traffic_flows_with_reasonable_delay():
+    m = run(make_engine("normal"), 300)
+    assert 40 <= m["passed_total"] <= 80          # 12 veh/min * 5 min = 60 expected
+    assert m["avg_trip_wait_s"] < 25
+    assert m["peds_crossed_total"] > 10
 
 
-# ──── Test 6: Emergency scenario — emergency vehicles present ────
-
-def test_scenario_06_emergency_vehicles_spawn():
-    state, engine = _run_sim("emergency", sim_seconds=30.0)
-    all_types = [v["vehicle_type"] for v in state["vehicles"]]
-    passed_total = state["metrics"].get("passed_total", 0)
-    assert passed_total >= 0  # at minimum simulation ran
-
-
-# ──── Test 7: Traffic jam — vehicles_waiting > 0 ────
-
-def test_scenario_07_traffic_jam_causes_waiting():
-    state, _ = _run_sim("traffic_jam", sim_seconds=30.0)
-    waiting = state["metrics"].get("vehicles_waiting", 0)
-    active = state["metrics"].get("vehicles_active", 0)
-    assert active + waiting >= 0  # simulation ran successfully
+def test_03_heavy_traffic_moves_more_vehicles_and_builds_queues():
+    normal = run(make_engine("normal"), 300)
+    e = make_engine("heavy")
+    peak = [0]
+    heavy = run(e, 300, lambda e: peak.__setitem__(0, max(peak[0], e.get_state()["metrics"]["vehicles_waiting"])))
+    assert heavy["passed_total"] > 2 * normal["passed_total"]
+    assert peak[0] >= 4
 
 
-# ──── Test 8: Failsafe scenario — simulation runs normally ────
-
-def test_scenario_08_failsafe_runs():
-    state, _ = _run_sim("failsafe", sim_seconds=30.0)
-    assert state["status"] == "stopped"
-    assert state["sim_time"] >= 0
+def test_04_pedestrian_rush_moves_many_pedestrians_without_blocking_cars():
+    m = run(make_engine("pedestrian_rush"), 300)
+    assert m["peds_crossed_total"] >= 100
+    assert m["passed_total"] >= 15                 # cars still get through
 
 
-# ──── Test 9: Demo scenario — sim_time advances ────
+def test_05_unbalanced_north_dominates_arrivals_and_stays_stable():
+    e = make_engine("unbalanced")
+    arrivals = {"north": set(), "south": set(), "east": set(), "west": set()}
 
-def test_scenario_09_demo_time_advances():
-    engine = SimulationEngine(seed=42, tick_rate=100.0)
-    cfg = get_scenario("demo_city_intersection")
-    cfg.pop("_notes", None)
-    cfg.pop("_timeline", None)
-    cfg.pop("name", None)
-    cfg.pop("description", None)
-    cfg["time_scale"] = 50.0
-
-    async def _run():
-        engine.configure(**cfg)
-        await engine.start()
-        await asyncio.sleep(0.5)
-        await engine.stop()
-
-    asyncio.run(_run())
-    assert engine.sim_time > 0.0
+    def watch(e):
+        for v in e._vehicles.values():
+            arrivals[v.direction].add(v.id)
+    m = run(e, 300, watch)
+    total = sum(len(s) for s in arrivals.values())
+    assert len(arrivals["north"]) / total > 0.55
+    assert m["avg_trip_wait_s"] < 60                # adaptive control copes with the imbalance
+    assert e._metrics.get_summary()["max_wait_s"] < 90
 
 
-# ──── Test 10 (bonus): All scenario IDs load without error ────
+def test_06_emergency_scenario_serves_emergency_vehicles_fast():
+    e = make_engine("emergency")
+    worst = {}
 
-def test_scenario_10_all_scenarios_loadable():
+    def watch(e):
+        for v in e._vehicles.values():
+            if v.vehicle_type == "emergency":
+                worst[v.id] = max(worst.get(v.id, 0.0), v.wait_time)
+    run(e, 300, watch)
+    assert len(worst) >= 3
+    assert max(worst.values()) <= 14.0
+
+
+def test_07_traffic_jam_builds_long_queues_then_recovers():
+    e = make_engine("traffic_jam")
+    peak = [0]
+    run(e, 240, lambda e: peak.__setitem__(0, max(peak[0], e.get_state()["metrics"]["congestion_pct"])))
+    assert peak[0] >= 60
+    e.configure(spawn_rate=0.0, ped_spawn_rate=0.0)
+    run(e, 300)
+    assert len(e._vehicles) == 0
+    assert e.get_state()["metrics"]["vehicles_waiting"] == 0
+
+
+def test_08_failsafe_uses_fixed_timing_and_still_moves_traffic():
+    e = make_engine("failsafe")
+    assert e.control_mode == "failsafe"
+    m = run(e, 300)
+    assert m["passed_total"] > 30
+
+
+def test_09_demo_timeline_ramps_up_jams_and_recovers():
+    e = make_engine("demo_city_intersection")
+    checkpoints = {}
+    for t in (10, 30, 70, 100, 130, 170):
+        while e.sim_time < t:
+            e._tick(0.1)
+        checkpoints[t] = e._spawn.spawn_rate
+    assert checkpoints == {10: 5.0, 30: 12.0, 70: 25.0, 100: 10.0, 130: 60.0, 170: 12.0}
+    assert e._spawn.ped_spawn_rate == 5.0
+
+
+def test_10_all_presets_are_complete_and_isolated_copies():
     for sid in SCENARIOS:
         cfg = get_scenario(sid)
-        assert "spawn_rate" in cfg
+        for key in ("name", "description", "spawn_rate", "ped_spawn_rate", "direction_probs", "type_probs"):
+            assert key in cfg, (sid, key)
+        assert sum(cfg["direction_probs"].values()) == pytest.approx(1.0)
+        assert sum(cfg["type_probs"].values()) == pytest.approx(1.0)
+    a = get_scenario("normal")
+    a["direction_probs"]["north"] = 99
+    assert get_scenario("normal")["direction_probs"]["north"] == 0.25      # deep copy
 
 
-# ──── Test 11 (bonus): Unknown scenario raises KeyError ────
-
-def test_scenario_11_unknown_raises():
+def test_11_unknown_scenario_raises_key_error():
     with pytest.raises(KeyError):
         get_scenario("nonexistent_scenario_xyz")
+
+
+def test_12_time_scale_in_scenario_does_not_leak_into_headless_runs():
+    e = make_engine("demo_city_intersection")
+    assert e.time_scale == 1.0

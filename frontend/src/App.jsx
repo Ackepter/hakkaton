@@ -1,5 +1,4 @@
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import Constructor from './pages/Constructor'
+import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import Simulation3D from './pages/Simulation3D'
 
@@ -24,20 +23,17 @@ export default function App() {
     <BrowserRouter>
       <nav style={styles.nav}>
         <span style={styles.brand}>🚦 Smart Intersection</span>
-        <NavLink to="/" end style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
-          Конструктор
+        <NavLink to="/simulation" style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
+          3D Simulation
         </NavLink>
         <NavLink to="/dashboard" style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
           Dashboard
         </NavLink>
-        <NavLink to="/simulation" style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
-          3D Simulation
-        </NavLink>
       </nav>
       <Routes>
-        <Route path="/" element={<Constructor />} />
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/" element={<Navigate to="/simulation" replace />} />
         <Route path="/simulation" element={<Simulation3D />} />
+        <Route path="/dashboard" element={<Dashboard />} />
       </Routes>
     </BrowserRouter>
   )
