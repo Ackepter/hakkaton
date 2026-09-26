@@ -77,6 +77,8 @@ class Lane:
     width_m: float = 4.0
     stop_line_m: float = 0.0  # meters from entry where stop line is (inbound only)
     traffic_light_id: Optional[str] = None
+    spawn_pos: float = 0.0    # position_m where vehicles enter (arms shorter than 80 m start later)
+    speed_limit: float = 25.0 # m/s
 
 
 @dataclass

@@ -59,3 +59,6 @@ config/intersection.json
 # YOLO models (large binaries)
 models/*.pt
 models/*.onnx
+
+# Constructor: remembered layout pointer (user layouts themselves may be committed)
+config/layouts/.last

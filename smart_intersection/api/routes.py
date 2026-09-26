@@ -6,11 +6,12 @@ import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 
 from ..engine.simulation import SimulationEngine
 from ..xml_export.exporter import SimStateExporter
 from ..scenarios.presets import SCENARIOS, get_scenario
+from ..layout import Layout, LayoutStore, presets as layout_presets, validate_layout
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,9 +20,23 @@ router = APIRouter()
 _engine: Optional[SimulationEngine] = None
 
 
+_store: Optional[LayoutStore] = None
+
+
 def set_engine(engine: SimulationEngine):
     global _engine
     _engine = engine
+
+
+def set_store(store: Optional[LayoutStore]):
+    global _store
+    _store = store
+
+
+def _get_store() -> LayoutStore:
+    if _store is None:
+        raise HTTPException(status_code=503, detail="layout store not initialized")
+    return _store
 
 
 def _get_engine() -> SimulationEngine:
@@ -134,6 +149,102 @@ async def push_perception(p: Perception):
 async def clear_perception():
     _get_engine().clear_perception()
     return {"active": False}
+
+
+# ──────────────────── Constructor: layout ────────────────────
+
+def _check(layout: Layout) -> None:
+    errors = validate_layout(layout)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+
+@router.get("/layout")
+async def get_layout():
+    return _get_engine().layout.model_dump()
+
+
+@router.post("/layout/validate")
+async def validate(layout: Layout):
+    errors = validate_layout(layout)
+    return {"valid": not errors, "errors": errors}
+
+
+@router.put("/layout")
+async def apply_layout(layout: Layout):
+    """Build the world from a layout. Restarts the simulation (it is stopped, the layout is remembered)."""
+    _check(layout)
+    engine = _get_engine()
+    await engine.apply_layout(layout)
+    try:
+        store = _get_store()
+        store.save(layout)
+        store.remember(layout.name)
+    except (OSError, HTTPException):
+        logger.warning("layout applied but could not be stored", exc_info=True)
+    return engine.layout.model_dump()
+
+
+@router.get("/layout/presets")
+async def list_presets():
+    return {name: l.model_dump() for name, l in layout_presets().items()}
+
+
+@router.get("/layouts")
+async def list_layouts():
+    return {"saved": _get_store().list(), "presets": sorted(layout_presets())}
+
+
+@router.post("/layouts")
+async def save_layout(layout: Layout):
+    _check(layout)
+    _get_store().save(layout)
+    return {"saved": layout.name}
+
+
+@router.get("/layouts/{name}")
+async def load_layout(name: str):
+    try:
+        return _get_store().load(name).model_dump()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"no saved layout {name!r}")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.delete("/layouts/{name}")
+async def delete_layout(name: str):
+    try:
+        _get_store().delete(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"no saved layout {name!r}")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"deleted": name}
+
+
+class SpawnRequest(BaseModel):
+    kind: Literal["vehicle", "pedestrian"]
+    arm: Optional[Literal["north", "south", "east", "west"]] = None
+    type: str = "car"
+    crossing: Optional[str] = None
+
+
+@router.post("/simulation/spawn")
+async def spawn(req: SpawnRequest):
+    """Interactive scenario control: add a vehicle on an arm or a pedestrian at a crosswalk right now."""
+    engine = _get_engine()
+    if req.kind == "vehicle":
+        if req.arm is None or f"{req.arm}-in" not in engine._lanes:
+            raise HTTPException(status_code=404, detail="that arm does not exist in the current layout")
+        v = engine.spawn_vehicle(req.arm, req.type)
+        if v is None:
+            raise HTTPException(status_code=409, detail="entry is blocked or the vehicle type is unknown")
+        return {"id": v.id}
+    if req.crossing is None or req.crossing not in engine._crossings:
+        raise HTTPException(status_code=404, detail="that crosswalk does not exist in the current layout")
+    p = engine.spawn_pedestrian(req.crossing)
+    return {"id": p.id}
 
 
 # ──────────────────── Traffic lights ────────────────────

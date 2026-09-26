@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 
 from .models import Vehicle, Pedestrian, SimTrafficLight
 from .world import build_world, ARM_LENGTH, STOP_LINE_DIST
+from ..layout import Layout, default_layout, validate_layout
 from .behaviors import update_vehicle, update_pedestrian, MIN_GAP_M
 from .traffic_generator import SpawnManager
 from .metrics import MetricsEngine
@@ -61,7 +62,8 @@ def _group_of(direction: str) -> str:
 
 
 class SimulationEngine:
-    def __init__(self, seed: int = 42, tick_rate: float = 10.0):
+    def __init__(self, seed: int = 42, tick_rate: float = 10.0, layout: Optional[Layout] = None):
+        self.layout = layout or default_layout()
         self.seed = seed
         self.tick_rate = tick_rate
         self.time_scale = 1.0
@@ -78,7 +80,8 @@ class SimulationEngine:
         self._rng = random.Random(self.seed)
         self._vehicles: Dict[str, Vehicle] = {}
         self._pedestrians: Dict[str, Pedestrian] = {}
-        self._lanes, self._lights, self._crossings = build_world()
+        self._lanes, self._lights, self._crossings = build_world(self.layout)
+        self._phases = self._build_program()
         self._phase_index = 0
         self._phase_elapsed = 0.0
         self._overrides: Dict[str, str] = {}
@@ -87,12 +90,53 @@ class SimulationEngine:
         self._perception_at = 0.0
         self._timeline: List[dict] = []
         self._timeline_idx = 0
-        self._spawn = SpawnManager(rng=self._rng)
+        self._spawn = self._make_spawner()
         self._metrics = MetricsEngine()
         self._newly_passed = 0
         self._newly_crossed = 0
         self._finished_waits: List[float] = []
         self.sim_time = 0.0
+
+    # ------------------------------------------------------------------ layout
+
+    @property
+    def sig(self):
+        return self.layout.signal
+
+    def _build_program(self) -> List[tuple]:
+        """(ns_state, ew_state, duration). Adaptive keeps the classic 6-phase cycle; fixed runs the user's program."""
+        sg = self.layout.signal
+        if sg.mode == "fixed" and sg.program:
+            return [(p.ns, p.ew, p.duration) for p in sg.program]
+        return [("GREEN", "RED", sg.base_green), ("YELLOW", "RED", sg.yellow), ("RED", "RED", sg.all_red),
+                ("RED", "GREEN", sg.base_green), ("RED", "YELLOW", sg.yellow), ("RED", "RED", sg.all_red)]
+
+    @property
+    def fixed_program(self) -> bool:
+        return self.layout.signal.mode == "fixed" and bool(self.layout.signal.program)
+
+    def _make_spawner(self) -> SpawnManager:
+        t = self.layout.traffic
+        sm = SpawnManager(spawn_rate=t.spawn_rate, ped_spawn_rate=t.ped_spawn_rate, type_probs=dict(t.type_probs),
+                          rng=self._rng)
+        arms = ("north", "south", "east", "west")
+        sm.arm_weights = {a: (self.layout.arms[a].weight if self.layout.arms[a].enabled else 0.0) for a in arms}
+        sm.arm_types = {a: {"bus": "bus", "tram": "tram"}.get(self.layout.arms[a].lane_type) for a in arms}
+        return sm
+
+    def set_layout(self, layout: Layout) -> None:
+        """Replace the layout and restart the world (synchronous; use apply_layout while running)."""
+        errors = validate_layout(layout)
+        if errors:
+            raise ValueError("; ".join(errors))
+        self.layout = layout
+        self.control_mode = "auto"
+        self.time_scale = 1.0
+        self._init_world()
+
+    async def apply_layout(self, layout: Layout) -> None:
+        await self.stop()
+        self.set_layout(layout)
 
     # ------------------------------------------------------------------ public
 
@@ -207,6 +251,21 @@ class SimulationEngine:
     def clear_overrides(self):
         self._overrides.clear()
 
+    def spawn_vehicle(self, arm: str, vehicle_type: str = "car") -> Optional[Vehicle]:
+        """Interactive: add one vehicle on `arm` now (refused when the arm is missing or its entry is blocked)."""
+        if f"{arm}-in" not in self._lanes:
+            return None
+        v = self._spawn.make_vehicle(arm, vehicle_type, self.sim_time)
+        return v if v is not None and self._try_place(v) else None
+
+    def spawn_pedestrian(self, crossing_id: str) -> Optional[Pedestrian]:
+        if crossing_id not in self._crossings:
+            return None
+        p = self._spawn.make_pedestrian(crossing_id, self.sim_time)
+        self._assign_ped_slot(p)
+        self._pedestrians[p.id] = p
+        return p
+
     def spawn_emergency(self, direction: str = "north") -> Optional[Vehicle]:
         v = self._spawn.add_emergency_vehicle(self.sim_time, direction)
         if self._try_place(v):
@@ -228,6 +287,8 @@ class SimulationEngine:
             "scenario": self.scenario,
             "intersection_id": self.intersection_id,
             "control_mode": self.control_mode,
+            "layout_name": self.layout.name,
+            "signal_mode": self.layout.signal.mode,
             "failsafe_reason": self.failsafe_reason(),
             "perception": self.perception_status(),
             "camera_failure": self.camera_failure,
@@ -293,7 +354,7 @@ class SimulationEngine:
     def _advance_phase(self, dt: float):
         self._phase_elapsed += dt
         if self._should_end_phase():
-            self._phase_index = (self._phase_index + 1) % len(PHASES)
+            self._phase_index = (self._phase_index + 1) % len(self._phases)
             self._phase_elapsed = 0.0
             for light in self._lights.values():
                 light.phase_switches += 1
@@ -301,16 +362,18 @@ class SimulationEngine:
                 light.phase_start_time = self.sim_time
 
     def _should_end_phase(self) -> bool:
-        idx, elapsed = self._phase_index, self._phase_elapsed
+        idx, elapsed, sg = self._phase_index, self._phase_elapsed, self.sig
+        if self.fixed_program:                          # the user's program is executed exactly
+            return elapsed >= self._phases[idx][2]
         if idx in (1, 4):
-            return elapsed >= YELLOW_S
+            return elapsed >= sg.yellow
         if idx in (2, 5):
             leaving = "ns" if idx == 2 else "ew"
-            return elapsed >= MAX_ALL_RED_S or (elapsed >= ALL_RED_S and not self._group_in_conflict_zone(leaving))
+            return elapsed >= MAX_ALL_RED_S or (elapsed >= sg.all_red and not self._group_in_conflict_zone(leaving))
         if self.failsafe_reason():
             return elapsed >= FAILSAFE_GREEN
         group = "ns" if idx == 0 else "ew"
-        if elapsed >= MAX_GREEN:
+        if elapsed >= sg.max_green:
             return True
         if self._peds_crossing_for(group):
             return False
@@ -320,11 +383,11 @@ class SimulationEngine:
         if emerg_other and elapsed >= EMERGENCY_MIN_GREEN:
             return True
         cur, other = self._demand(group), self._demand(OTHER[group])
-        if elapsed >= MIN_GREEN and self._ped_priority(OTHER[group]):
+        if elapsed >= sg.min_green and self._ped_priority(OTHER[group]):
             return True                                   # many pedestrians: give their phase priority
-        if elapsed >= MIN_GREEN and cur == 0 and other > 0:
+        if elapsed >= sg.min_green and cur == 0 and other > 0:
             return True
-        if elapsed >= BASE_GREEN and other > 0:
+        if elapsed >= sg.base_green and other > 0:
             return True
         return False
 
@@ -391,14 +454,14 @@ class SimulationEngine:
                    for p in self._pedestrians.values())
 
     def _apply_lights(self):
-        ns_state, ew_state, _ = PHASES[self._phase_index]
+        ns_state, ew_state, _ = self._phases[self._phase_index]
         for lid, light in self._lights.items():
             if lid in self._overrides:
                 light.state = self._overrides[lid]
             else:
                 light.state = ns_state if _group_of(light.direction) == "ns" else ew_state
             light.phase_index = self._phase_index
-            light.phase_duration = PHASES[self._phase_index][2]
+            light.phase_duration = self._phases[self._phase_index][2]
 
     # --- traffic
 
@@ -421,6 +484,14 @@ class SimulationEngine:
 
     def _try_place(self, v: Vehicle) -> bool:
         """Insert a new vehicle only if the entry point is free; adapt its speed to the leader."""
+        lane = self._lanes.get(v.lane_id)
+        if lane is None:
+            return False
+        v.position_m = lane.spawn_pos
+        v.max_speed = min(v.max_speed, lane.speed_limit)
+        # a short arm leaves little room before the stop line: never enter faster than the car could stop from
+        room = max(lane.stop_line_m - (v.position_m + v.length_m / 2), 0.5)
+        v.speed_mps = min(v.speed_mps, v.max_speed, math.sqrt(2 * 0.7 * v.decel * room))
         lane_vs = [x for x in self._vehicles.values() if x.lane_id == v.lane_id]
         if sum(1 for x in lane_vs if x.state == "waiting") >= MAX_QUEUE:
             return False
@@ -470,12 +541,31 @@ class SimulationEngine:
     def _ped_signal(self, crossing_id: str) -> str:
         if self._overrides:
             return "RED"
+        crossing_time = 12.0 / 1.4 + PED_MARGIN_S
+        if self.fixed_program:
+            return "GREEN" if self._fixed_window_ok(crossing_id, crossing_time) else "RED"
         need = self._crossing_needs(crossing_id)
         if self._phase_index != GREEN_PHASE[need]:
             return "RED"
-        limit = FAILSAFE_GREEN if self.failsafe_reason() else MAX_GREEN
-        crossing_time = 12.0 / 1.4 + PED_MARGIN_S
+        limit = FAILSAFE_GREEN if self.failsafe_reason() else self.sig.max_green
         return "GREEN" if self._phase_elapsed + crossing_time <= limit else "RED"
+
+    def _fixed_window_ok(self, crossing_id: str, needed: float) -> bool:
+        """User program: walk only while this arm's traffic is red for long enough and has cleared the crosswalk."""
+        group = _group_of(self._crossings[crossing_id].direction)
+        pick = (lambda ph: ph[0]) if group == "ns" else (lambda ph: ph[1])
+        n, idx = len(self._phases), self._phase_index
+        if pick(self._phases[idx]) != "RED" or self._group_in_conflict_zone(group):
+            return False
+        window = self._phases[idx][2] - self._phase_elapsed
+        for k in range(1, n):
+            ph = self._phases[(idx + k) % n]
+            if pick(ph) != "RED":
+                break
+            window += ph[2]
+        else:
+            return True                                    # this group is never given green
+        return window >= needed
 
     def _update_pedestrians(self, dt: float):
         finished = []

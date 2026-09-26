@@ -80,3 +80,73 @@ def test_render_has_requested_size_and_paints_vehicles():
     assert img.size == (640, 480)
     colours = {c for _, c in img.getcolors(maxcolors=1_000_000)}
     assert (59, 130, 246) in colours                       # a blue car is somewhere in the picture
+
+
+# ---------------------------------------------------------------- layout-aware camera
+
+from types import SimpleNamespace
+
+GRASS, LINE = (63, 125, 63), (235, 235, 235)
+
+
+def _empty_state():
+    return SimpleNamespace(vehicles=[], pedestrians=[], lights=[], simulation=SimpleNamespace(sim_time=0.0))
+
+
+def _pixel(view, img, x, z):
+    px, py = view.to_px(x, z)
+    return img.getpixel((int(px), int(py)))
+
+
+def test_render_draws_only_the_arms_of_the_layout():
+    view = SimView(640, 640)
+    arms = {a: {"enabled": True, "length_m": 80, "crossing": True} for a in ("north", "south", "east", "west")}
+    full = view.render(_empty_state(), arms=arms)
+    assert _pixel(view, full, 40, 0) != GRASS                                   # east road exists
+    arms["east"]["enabled"] = False
+    arms["north"]["length_m"] = 40
+    part = view.render(_empty_state(), arms=arms)
+    assert _pixel(view, part, 40, 0) == GRASS                                   # east arm removed
+    assert _pixel(view, part, 0, -30) != GRASS and _pixel(view, part, 0, -55) == GRASS   # north shortened to 40 m
+
+
+def test_stop_lines_are_on_the_inbound_lane_of_every_arm():
+    view = SimView(640, 640)
+    img = view.render(_empty_state())
+    inbound = {"north": (-2, -21), "south": (2, 21), "east": (21, -2), "west": (-21, 2)}
+    outbound = {"north": (2, -21), "south": (-2, 21), "east": (21, 2), "west": (-21, -2)}
+    for arm in inbound:
+        assert _pixel(view, img, *inbound[arm]) == LINE, arm
+        assert _pixel(view, img, *outbound[arm]) != LINE, arm
+
+
+def test_crosswalk_stripes_only_where_the_arm_has_a_crossing():
+    view = SimView(640, 640)
+    arms = {a: {"enabled": True, "length_m": 80, "crossing": a != "east"} for a in ("north", "south", "east", "west")}
+    img = view.render(_empty_state(), arms=arms)
+    stripe = (220, 220, 225)
+    seen = lambda x, z: _pixel(view, img, x, z) == stripe
+    assert any(seen(-5.4 + 1.2 * i, -18.5) for i in range(10))                  # north crosswalk
+    assert not any(seen(18.5, -5.4 + 1.2 * i) for i in range(10))               # east crosswalk removed
+
+
+def test_camera_view_centre_and_zone_filtering():
+    view = SimView(640, 640, radius_m=40, center=(-12, -12))
+    assert view.to_px(-12, -12) == (320, 320) and view.sees(20, 20) and not view.sees(40, 0)
+    ids = {z.id for z in view.default_zones()}
+    assert "north-in" in ids and "west-in" in ids and "east-in" not in ids and "south-in" not in ids
+    only = {z.id for z in SimView().default_zones(arms={"north", "east"}, crossings={"PC-N"})}
+    assert only == {"north-in", "east-in", "PC-N"}
+    assert {z.id for z in SimView().default_zones(skip={"north-in", "PC-N"})} >= {"south-in"}
+    assert "north-in" not in {z.id for z in SimView().default_zones(skip={"north-in"})}
+
+
+def test_detections_outside_a_smaller_view_are_not_reported():
+    from backend.xml_parser.parser import XmlParser
+    e = make_engine("heavy")
+    e.advance(80)
+    data = XmlParser.parse(SimStateExporter.to_xml(e.get_state()), validate=False)
+    wide = SimView(640, 640, radius_m=64).detections(data)
+    narrow = SimView(640, 640, radius_m=30).detections(data)
+    assert 0 < len(narrow) < len(wide)
+    assert all(abs(d.world[0]) <= 30 and abs(d.world[1]) <= 30 for d in narrow)

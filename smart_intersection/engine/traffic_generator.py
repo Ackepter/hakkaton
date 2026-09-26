@@ -3,7 +3,7 @@ Traffic Generator — spawns vehicles and pedestrians with configurable rates.
 """
 import math
 import random
-from typing import Dict
+from typing import Dict, Optional
 from .models import Vehicle, Pedestrian, VEHICLE_DEFAULTS
 
 
@@ -44,6 +44,8 @@ class SpawnManager:
         self._vehicle_counter = 0
         self._ped_counter = 0
         self._crossing_counts: Dict[str, int] = {}
+        self.arm_weights: Dict[str, float] = {}        # per-arm arrival weight (0 = arm missing)
+        self.arm_types: Dict[str, Optional[str]] = {}  # per-arm vehicle type (bus lane / tram track)
 
     def try_spawn_vehicles(self, sim_time: float, dt: float):
         """
@@ -84,9 +86,17 @@ class SpawnManager:
         return peds
 
     def _create_vehicle(self, sim_time: float):
-        direction = self._weighted_choice(self.direction_probs)
-        vtype = self._weighted_choice(self.type_probs)
-        if not direction or not vtype:
+        weights = {d: p * self.arm_weights.get(d, 1.0) for d, p in self.direction_probs.items()}
+        direction = self._weighted_choice(weights)
+        if not direction:
+            return None
+        vtype = self.arm_types.get(direction) or self._weighted_choice(self.type_probs)
+        if not vtype:
+            return None
+        return self.make_vehicle(direction, vtype, sim_time)
+
+    def make_vehicle(self, direction: str, vtype: str, sim_time: float):
+        if vtype not in VEHICLE_DEFAULTS:
             return None
         defaults = VEHICLE_DEFAULTS.get(vtype, VEHICLE_DEFAULTS["car"])
         self._vehicle_counter += 1
@@ -137,6 +147,13 @@ class SpawnManager:
         for k, v in kwargs.items():
             if hasattr(self, k):
                 setattr(self, k, v)
+
+    def make_pedestrian(self, crossing_id: str, sim_time: float) -> Pedestrian:
+        self._ped_counter += 1
+        n = self._crossing_counts.get(crossing_id, 0)
+        self._crossing_counts[crossing_id] = n + 1
+        return Pedestrian(id=f"ped-{self._ped_counter:04d}", crossing_id=crossing_id, state="walking_to_crossing",
+                          spawn_time=sim_time, wait_time=0.0, position_m=-2.5, direction=1 if n % 2 == 0 else -1)
 
     def add_emergency_vehicle(self, sim_time: float, direction: str = "north") -> Vehicle:
         """Spawn a single emergency vehicle immediately."""
