@@ -6,7 +6,7 @@ import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Dict, Optional
 
 from ..engine.simulation import SimulationEngine
 from ..xml_export.exporter import SimStateExporter
@@ -38,6 +38,7 @@ class SimConfig(BaseModel):
     time_scale: Optional[float] = Field(None, ge=0.1, le=20)
     scenario: Optional[str] = None
     control_mode: Optional[str] = Field(None, pattern="^(auto|failsafe)$")
+    camera_failure: Optional[bool] = None
 
 
 @router.post("/simulation/start")
@@ -100,6 +101,39 @@ async def update_config(cfg: SimConfig):
     kwargs = {k: v for k, v in cfg.model_dump().items() if v is not None}
     engine.configure(**kwargs)
     return {"updated": list(kwargs.keys())}
+
+
+class CameraFailure(BaseModel):
+    active: bool
+
+
+@router.post("/simulation/camera-failure")
+async def set_camera_failure(req: CameraFailure):
+    """Unplug / re-plug the virtual camera (scenario 'Camera/Detection Failure')."""
+    _get_engine().configure(camera_failure=req.active)
+    return {"camera_failure": req.active}
+
+
+class Perception(BaseModel):
+    """What the camera pipeline of the main project currently sees (arm -> vehicles in the approach zone)."""
+    camera_ok: bool = True
+    vehicles: Dict[str, int] = {}
+    pedestrians_waiting: Dict[str, int] = {}
+    ped_priority: Dict[str, bool] = {}          # crosswalk -> crowd above the configured threshold
+    emergency: Dict[str, bool] = {}
+
+
+@router.post("/perception")
+async def push_perception(p: Perception):
+    engine = _get_engine()
+    engine.set_perception(p.model_dump())
+    return {"failsafe_reason": engine.failsafe_reason()}
+
+
+@router.delete("/perception")
+async def clear_perception():
+    _get_engine().clear_perception()
+    return {"active": False}
 
 
 # ──────────────────── Traffic lights ────────────────────
@@ -185,6 +219,16 @@ async def get_xml_state():
     state = _get_engine().get_state()
     xml_str = SimStateExporter.to_xml(state)
     return Response(content=xml_str, media_type="application/xml")
+
+
+@router.get("/sensor/camera-feed")
+async def camera_feed():
+    """Virtual camera output (XML). 503 while the camera is 'unplugged' so consumers see a real signal loss."""
+    engine = _get_engine()
+    if engine.camera_failure:
+        raise HTTPException(status_code=503, detail="virtual camera unavailable")
+    from fastapi.responses import Response
+    return Response(content=SimStateExporter.to_xml(engine.get_state()), media_type="application/xml")
 
 
 # ──────────────────── Health ────────────────────

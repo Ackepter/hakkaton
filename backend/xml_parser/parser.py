@@ -62,9 +62,10 @@ class XmlParser:
             raise XmlParseError(f"XML parse error: {e}") from e
 
     @classmethod
-    def parse(cls, xml_str: str) -> IntersectionData:
-        """Parse XML string → IntersectionData. Validates if lxml available."""
-        cls.validate(xml_str)
+    def parse(cls, xml_str: str, validate: bool = True) -> IntersectionData:
+        """Parse XML string → IntersectionData. Validates against the XSD when lxml is available."""
+        if validate:
+            cls.validate(xml_str)
 
         # Strip XML declaration for ElementTree
         body = xml_str
@@ -130,6 +131,8 @@ class XmlParser:
                     state=el.get("state", "walking_to_crossing"),
                     position_m=float(el.get("position_m", 0)),
                     wait_time=float(el.get("wait_time", 0)),
+                    direction=int(el.get("direction", 1)),
+                    offset=float(el.get("offset", 0.0)),
                 ))
 
         # <metrics>

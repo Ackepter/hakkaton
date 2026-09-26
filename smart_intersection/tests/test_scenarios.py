@@ -84,11 +84,16 @@ def test_07_traffic_jam_builds_long_queues_then_recovers():
     assert e.get_state()["metrics"]["vehicles_waiting"] == 0
 
 
-def test_08_failsafe_uses_fixed_timing_and_still_moves_traffic():
+def test_08_camera_failure_switches_to_fixed_timing_and_back():
     e = make_engine("failsafe")
-    assert e.control_mode == "failsafe"
-    m = run(e, 300)
-    assert m["passed_total"] > 30
+    reasons = {}
+    for t in (30, 70, 130):
+        while e.sim_time < t:
+            e._tick(0.1)
+        reasons[t] = e.failsafe_reason()
+    assert reasons == {30: None, 70: "camera failure", 130: None}
+    m = e.get_state()["metrics"]
+    assert m["passed_total"] > 10                  # traffic keeps moving through the failure
 
 
 def test_09_demo_timeline_ramps_up_jams_and_recovers():

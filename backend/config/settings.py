@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     camera_width: int = Field(default=640)
     camera_height: int = Field(default=480)
 
+    # Vision
+    vision_enabled: bool = Field(default=True)
+    vision_config_path: str = Field(default="config/cameras.yaml")
+    si_base_url: str = Field(default="http://127.0.0.1:8001")
+    vision_push_to_simulation: bool = Field(default=True)
+
     # CORS
     cors_origins: list[str] = Field(default=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"])
 

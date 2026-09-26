@@ -32,10 +32,12 @@ EMERGENCY_MIN_GREEN = 5.0
 EMERGENCY_LOOKAHEAD_M = 60.0
 DEMAND_LOOKAHEAD_M = 40.0
 PED_MARGIN_S = 1.0
+PED_PRIORITY_THRESHOLD = 5        # waiting pedestrians on one crosswalk that earn their phase priority (ground truth)
 PED_LANES = {1: (-1.2, -0.75, -0.3), -1: (0.3, 0.75, 1.2)}   # opposite directions never share a lateral lane
 PED_QUEUE_SPACING_M = 0.5
 MAX_SUBSTEP = 0.1
 MAX_QUEUE = 20
+PERCEPTION_TIMEOUT_S = 3.0   # sim-seconds (scaled by time_scale) without camera data -> FAILSAFE
 MIN_TIME_SCALE = 0.1
 MAX_TIME_SCALE = 20.0
 
@@ -80,6 +82,9 @@ class SimulationEngine:
         self._phase_index = 0
         self._phase_elapsed = 0.0
         self._overrides: Dict[str, str] = {}
+        self.camera_failure = False           # virtual camera unplugged (scenario / API switch)
+        self._perception: Optional[dict] = None  # latest camera-derived demand pushed by the main project
+        self._perception_at = 0.0
         self._timeline: List[dict] = []
         self._timeline_idx = 0
         self._spawn = SpawnManager(rng=self._rng)
@@ -132,6 +137,8 @@ class SimulationEngine:
             self.time_scale = max(MIN_TIME_SCALE, min(MAX_TIME_SCALE, float(kwargs["time_scale"])))
         if kwargs.get("scenario") is not None:
             self.scenario = kwargs["scenario"]
+        if kwargs.get("camera_failure") is not None:
+            self.camera_failure = bool(kwargs["camera_failure"])
         if kwargs.get("control_mode") is not None:
             if kwargs["control_mode"] not in CONTROL_MODES:
                 raise ValueError(f"control_mode must be one of {CONTROL_MODES}")
@@ -155,6 +162,47 @@ class SimulationEngine:
             self._overrides[light_id] = state
             self._lights[light_id].state = state
         return True
+
+    def set_perception(self, payload: dict):
+        """Camera-derived view of the intersection, produced by the vision pipeline of the main project."""
+        self._perception = {
+            "camera_ok": bool(payload.get("camera_ok", True)),
+            "vehicles": dict(payload.get("vehicles", {})),
+            "pedestrians_waiting": dict(payload.get("pedestrians_waiting", {})),
+            "ped_priority": dict(payload.get("ped_priority", {})),
+            "emergency": dict(payload.get("emergency", {})),
+        }
+        self._perception_at = self.sim_time
+
+    def clear_perception(self):
+        """Back to ground-truth demand (no camera pipeline attached)."""
+        self._perception = None
+
+    def perception_status(self) -> dict:
+        stale = (self._perception is not None and
+                 self.sim_time - self._perception_at > PERCEPTION_TIMEOUT_S * max(1.0, self.time_scale))
+        return {
+            "active": self._perception is not None,
+            "camera_ok": bool(self._perception and self._perception["camera_ok"]),
+            "stale": stale,
+        }
+
+    def _perception_usable(self) -> bool:
+        p = self.perception_status()
+        return p["active"] and p["camera_ok"] and not p["stale"] and not self.camera_failure
+
+    def failsafe_reason(self) -> Optional[str]:
+        """Why the signal plan is fixed-time right now, or None when adaptive control is available."""
+        if self.control_mode == "failsafe":
+            return "manual failsafe"
+        if self.camera_failure:
+            return "camera failure"
+        p = self.perception_status()
+        if p["active"] and not p["camera_ok"]:
+            return "camera unavailable"
+        if p["active"] and p["stale"]:
+            return "camera data lost"
+        return None
 
     def clear_overrides(self):
         self._overrides.clear()
@@ -180,6 +228,9 @@ class SimulationEngine:
             "scenario": self.scenario,
             "intersection_id": self.intersection_id,
             "control_mode": self.control_mode,
+            "failsafe_reason": self.failsafe_reason(),
+            "perception": self.perception_status(),
+            "camera_failure": self.camera_failure,
             "phase": {"index": self._phase_index, "elapsed": round(self._phase_elapsed, 2)},
             "vehicles": [_vehicle_to_dict(v) for v in self._vehicles.values()],
             "pedestrians": [_ped_to_dict(p) for p in self._pedestrians.values()],
@@ -256,7 +307,7 @@ class SimulationEngine:
         if idx in (2, 5):
             leaving = "ns" if idx == 2 else "ew"
             return elapsed >= MAX_ALL_RED_S or (elapsed >= ALL_RED_S and not self._group_in_conflict_zone(leaving))
-        if self.control_mode == "failsafe":
+        if self.failsafe_reason():
             return elapsed >= FAILSAFE_GREEN
         group = "ns" if idx == 0 else "ew"
         if elapsed >= MAX_GREEN:
@@ -269,6 +320,8 @@ class SimulationEngine:
         if emerg_other and elapsed >= EMERGENCY_MIN_GREEN:
             return True
         cur, other = self._demand(group), self._demand(OTHER[group])
+        if elapsed >= MIN_GREEN and self._ped_priority(OTHER[group]):
+            return True                                   # many pedestrians: give their phase priority
         if elapsed >= MIN_GREEN and cur == 0 and other > 0:
             return True
         if elapsed >= BASE_GREEN and other > 0:
@@ -292,6 +345,11 @@ class SimulationEngine:
 
     def _demand(self, group: str) -> int:
         """Vehicles queued/approaching on the group's arms plus pedestrians that need its green."""
+        if self._perception_usable():
+            p = self._perception
+            return (sum(p["vehicles"].get(d, 0) for d in GROUP_DIRS[group]) +
+                    sum(n for cid, n in p["pedestrians_waiting"].items()
+                        if cid in self._crossings and self._crossing_needs(cid) == group))
         n = 0
         for v in self._vehicles.values():
             if _group_of(v.direction) != group:
@@ -304,7 +362,20 @@ class SimulationEngine:
                 n += 1
         return n
 
+    def _ped_priority(self, group: str) -> bool:
+        """A crowd waits on a crosswalk that only this group's green can serve."""
+        if self._perception_usable():
+            return any(flag for cid, flag in self._perception["ped_priority"].items()
+                       if cid in self._crossings and self._crossing_needs(cid) == group)
+        waiting: Dict[str, int] = {}
+        for p in self._pedestrians.values():
+            if p.state == "waiting_for_green":
+                waiting[p.crossing_id] = waiting.get(p.crossing_id, 0) + 1
+        return any(n >= PED_PRIORITY_THRESHOLD for cid, n in waiting.items() if self._crossing_needs(cid) == group)
+
     def _emergency_demand(self, group: str) -> bool:
+        if self._perception_usable():
+            return any(self._perception["emergency"].get(d) for d in GROUP_DIRS[group])
         for v in self._vehicles.values():
             if v.vehicle_type == "emergency" and _group_of(v.direction) == group:
                 if -0.5 < self._dist_to_stop(v) < EMERGENCY_LOOKAHEAD_M:
@@ -402,7 +473,7 @@ class SimulationEngine:
         need = self._crossing_needs(crossing_id)
         if self._phase_index != GREEN_PHASE[need]:
             return "RED"
-        limit = FAILSAFE_GREEN if self.control_mode == "failsafe" else MAX_GREEN
+        limit = FAILSAFE_GREEN if self.failsafe_reason() else MAX_GREEN
         crossing_time = 12.0 / 1.4 + PED_MARGIN_S
         return "GREEN" if self._phase_elapsed + crossing_time <= limit else "RED"
 

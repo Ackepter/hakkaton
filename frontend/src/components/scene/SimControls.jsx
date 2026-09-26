@@ -19,7 +19,7 @@ const SCENARIOS = [
   { id: 'demo_city_intersection', name: 'Full Demo' },
 ]
 
-export default function SimControls({ simStatus, metrics }) {
+export default function SimControls({ simStatus, metrics, cameraFailure = false, failsafeReason = null }) {
   const [scenario, setScenario] = useState('normal')
   const [timeScale, setTimeScale] = useState(1)
   const [controlMode, setControlMode] = useState('auto')
@@ -36,7 +36,6 @@ export default function SimControls({ simStatus, metrics }) {
     setControlMode(scenario === 'failsafe' ? 'failsafe' : 'auto')
     return call('post', '/scenario/start', { scenario_id: scenario })
   }
-  const handleStop  = () => call('post', '/simulation/stop')
   const handlePause = () =>
     simStatus === 'paused'
       ? call('post', '/simulation/resume')
@@ -52,8 +51,6 @@ export default function SimControls({ simStatus, metrics }) {
 
   const isRunning = simStatus === 'running'
   const isPaused  = simStatus === 'paused'
-
-  const btn = (extra) => `px-3 py-1.5 rounded text-sm font-medium transition-colors ${extra}`
 
   return (
     <div style={{ color: '#fff', fontSize: 13 }}>
@@ -91,12 +88,6 @@ export default function SimControls({ simStatus, metrics }) {
         >{isPaused ? '▶ Resume' : '⏸ Pause'}</button>
 
         <button
-          onClick={handleStop}
-          disabled={!isRunning && !isPaused}
-          style={btnStyle('#b91c1c')}
-        >⏹ Stop</button>
-
-        <button
           onClick={handleReset}
           style={btnStyle('#374151')}
         >↺ Reset</button>
@@ -114,6 +105,15 @@ export default function SimControls({ simStatus, metrics }) {
           <option value="failsafe">Fixed timing (FAILSAFE)</option>
         </select>
       </div>
+
+      {/* Camera failure (scenario "Camera/Detection Failure") */}
+      <button
+        onClick={() => call('post', '/simulation/camera-failure', { active: !cameraFailure })}
+        style={{ ...btnStyle(cameraFailure ? '#b91c1c' : '#374151'), width: '100%', marginBottom: 10 }}
+      >{cameraFailure ? '📷 Вернуть камеру' : '📷 Сбой камеры'}</button>
+      {failsafeReason && (
+        <div style={{ color: '#fca5a5', fontSize: 11, marginBottom: 10 }}>FAILSAFE: {failsafeReason}</div>
+      )}
 
       {/* Speed slider */}
       <div style={{ marginBottom: 12 }}>

@@ -9,8 +9,9 @@ import VehicleModel from './VehicleModel'
 import PedestrianModel from './PedestrianModel'
 import TrafficLightModel from './TrafficLightModel'
 import SceneEnvironment from './SceneEnvironment'
+import CameraModel from './CameraModel'
 
-export default function IntersectionScene({ vehicles = [], pedestrians = [], lights = [] }) {
+export default function IntersectionScene({ vehicles = [], pedestrians = [], lights = [], camera = null, cameraHealthy = true }) {
   return (
     <Canvas
       shadows
@@ -41,6 +42,8 @@ export default function IntersectionScene({ vehicles = [], pedestrians = [], lig
 
       <SceneEnvironment />
       <RoadSystem />
+
+      {camera && <CameraModel camera={camera} healthy={cameraHealthy} />}
 
       {lights.map(l => (
         <TrafficLightModel key={l.id} {...l} />

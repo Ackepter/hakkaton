@@ -110,6 +110,8 @@
     <xs:attribute name="state"       type="PedStateEnum" use="required"/>
     <xs:attribute name="position_m"  type="xs:decimal" use="required"/>
     <xs:attribute name="wait_time"   type="xs:decimal" use="required"/>
+    <xs:attribute name="direction"   type="xs:integer" use="optional"/>
+    <xs:attribute name="offset"      type="xs:decimal" use="optional"/>
   </xs:complexType>
 
   <xs:simpleType name="PedStateEnum">

@@ -13,6 +13,8 @@ import os
 from .config.settings import settings
 from .api import intersection_router, lights_router, control_router, metrics_router
 from .api.routes_si import router as si_router
+from .api.routes_vision import router as vision_router
+from .vision import to_traffic_data
 from .core import app_state
 from .models.schemas import IntersectionConfig, SystemMode
 
@@ -38,6 +40,9 @@ async def lifespan(app: FastAPI):
     # Start simulation
     await app_state.simulator.start()
 
+    # Start cameras / computer vision (optional: the backend runs without any camera)
+    await app_state.start_vision()
+
     # Start background broadcast task
     broadcast_task = asyncio.create_task(broadcast_loop())
 
@@ -46,6 +51,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     broadcast_task.cancel()
+    await app_state.stop_vision()
     await app_state.simulator.stop()
     await app_state.controller.stop()
     logger.info("Backend shutdown complete")
@@ -71,6 +77,7 @@ app.include_router(lights_router)
 app.include_router(control_router)
 app.include_router(metrics_router)
 app.include_router(si_router)
+app.include_router(vision_router)
 
 
 async def broadcast_loop():
@@ -78,8 +85,14 @@ async def broadcast_loop():
     while True:
         try:
             if connected_clients:
-                # Gather current state
-                traffic_data = app_state.simulator.get_traffic_data()
+                # Traffic picture: camera analysis when a healthy camera exists, otherwise the built-in simulator
+                vision = app_state.vision
+                snap = vision.snapshot() if vision and vision.healthy else None
+                traffic_data = to_traffic_data(snap) if snap else app_state.simulator.get_traffic_data()
+                if vision and vision.active:
+                    cam = next(iter(vision.pipelines.values()))
+                    app_state.metrics.set_camera_status(cam.camera_state, cam.fps)
+                    app_state.metrics.set_yolo_status(cam.detector_state)
                 light_states = app_state.controller.get_light_states()
 
                 # Update light states in simulator
@@ -107,6 +120,8 @@ async def broadcast_loop():
                     "lights": light_states,
                     "metrics": app_state.metrics.get_latest(),
                     "simulation_running": app_state.simulator.is_running,
+                    "vision": vision.status(detail=False) if vision else
+                    {"active": False, "healthy": False, "reason": "vision not running", "cameras": [], "analysis": None},
                 }
 
                 msg = json.dumps(payload)

@@ -25,6 +25,8 @@ class PedestrianDTO:
     state: str
     position_m: float
     wait_time: float
+    direction: int = 1
+    offset: float = 0.0
 
 
 @dataclass

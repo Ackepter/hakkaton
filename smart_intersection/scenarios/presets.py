@@ -68,14 +68,17 @@ SCENARIOS = {
         "type_probs": {"car": 0.80, "truck": 0.10, "bus": 0.08, "tram": 0.02, "emergency": 0.0},
     },
     "failsafe": {
-        "name": "Sensor Failure — FAILSAFE Mode",
-        "description": "Normal traffic but intersection operates on failsafe timing",
+        "name": "Camera/Detection Failure",
+        "description": "Normal traffic; the virtual camera drops out at 40 s and returns at 100 s (FAILSAFE in between)",
         "spawn_rate": 12.0,
         "ped_spawn_rate": 5.0,
         "time_scale": 1.0,
         "direction_probs": {"north": 0.25, "south": 0.25, "east": 0.25, "west": 0.25},
         "type_probs": {"car": 0.75, "truck": 0.10, "bus": 0.10, "tram": 0.04, "emergency": 0.01},
-        "control_mode": "failsafe",   # detectors are down: fixed-time signal plan, no adaptation
+        "timeline": [
+            {"at_sim_s": 40, "camera_failure": True},
+            {"at_sim_s": 100, "camera_failure": False},
+        ],
     },
     "demo_city_intersection": {
         "name": "Full Demo — City Intersection",

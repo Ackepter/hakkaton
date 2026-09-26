@@ -10,6 +10,7 @@
 - [Быстрый старт](#быстрый-старт)
 - [Запуск на Windows / WSL Debian 12](#запуск-на-windows--wsl-debian-12)
 - [Запуск на Raspberry Pi](#запуск-на-raspberry-pi)
+- [Камеры и компьютерное зрение](#камеры-и-компьютерное-зрение)
 - [Режимы работы](#режимы-работы)
 - [Архитектура](#архитектура)
 - [API](#api)
@@ -154,9 +155,29 @@ pytest tests/ -v
 pytest tests/test_controller.py -v
 pytest tests/test_simulation.py -v
 pytest tests/test_api.py -v
+
+# Камеры и компьютерное зрение
+pytest tests/test_vision_*.py -v
+pytest tests/test_e2e_vision.py -v        # запускает SI и backend отдельными процессами
+
+# Smart Intersection
+pytest smart_intersection/tests -v
 ```
 
 Тесты **не требуют** Raspberry Pi или реального оборудования.
+
+---
+
+## Камеры и компьютерное зрение
+
+Камера подключается через `config/cameras.yaml`: `simulation` (виртуальная камера над Smart Intersection),
+`usb`, `file` (видеофайл вместо камеры в WSL), `network`. Детекция — `virtual` (данные симуляции) или локальный
+`yolo` (CPU, без CUDA, `pip install -r requirements-yolo.txt`). На Dashboard слева видеопоток с рамками
+распознанных объектов, справа состояние перекрёстка; в 3D-сцене камера показана как объект, а панель справа
+транслирует её картинку. Потеря камеры, отказ YOLO или недоступность симуляции переводят светофоры в FAILSAFE,
+интерфейс продолжает работать. **Камера не обязательна** для запуска.
+
+Подробности, API, зоны и настройка: [docs/cameras-and-vision.md](docs/cameras-and-vision.md).
 
 ---
 
@@ -194,10 +215,10 @@ Common code
     │       ├── MockGPIO (dev/WSL)
     │       └── RaspberryPiGPIO (production)
     │
-    └── CameraSource (future)
-            ├── SimulationSource
-            ├── USBCamera
-            └── VideoFile
+    └── Vision (backend/vision, независим от контроллера и GPIO)
+            ├── CameraSource: SimulationSource / UsbSource / FileSource / NetworkSource
+            ├── Detector: VirtualDetector / YoloDetector
+            └── TrafficAnalyzer → Dashboard, FAILSAFE, Smart Intersection
 ```
 
 ### Платформозависимый код
@@ -206,7 +227,7 @@ Common code
 |-----------|--------------|--------------|
 | GPIO | `MockGPIO` | `RaspberryPiGPIO` |
 | Camera | Simulation / Video file | USB Camera |
-| YOLO | Simulation (no real YOLO) | YOLOv8n on CPU |
+| YOLO | Virtual detection или YOLO на CPU | YOLOv8n на CPU (`imgsz: 320`) или вынос на другой ПК |
 
 ---
 

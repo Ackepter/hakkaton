@@ -37,6 +37,9 @@ class TrafficController:
         self._pedestrian_priority_threshold = 5
         self._pedestrian_priority_weight = 1.3
         self._task: Optional[asyncio.Task] = None
+        self._data_healthy = True
+        self._data_reason: Optional[str] = None
+        self._failsafe_auto = False          # FAILSAFE entered because the data source failed (not by the user)
 
     def load_config(self, config: IntersectionConfig) -> None:
         """Load intersection config and create/update traffic lights."""
@@ -94,9 +97,25 @@ class TrafficController:
     def get_light_states(self) -> List[Dict]:
         return [light.to_dict() for light in self._lights.values()]
 
-    def set_mode(self, mode: SystemMode, reason: Optional[str] = None) -> None:
+    @property
+    def data_healthy(self) -> bool:
+        return self._data_healthy
+
+    def set_data_health(self, healthy: bool, reason: Optional[str] = None) -> None:
+        """Camera / vision availability. Unhealthy -> FAILSAFE (AUTO only; MANUAL is left to the operator)."""
+        self._data_healthy, self._data_reason = healthy, None if healthy else (reason or "no data")
+        if not healthy and self._mode == SystemMode.AUTO:
+            self.set_mode(SystemMode.FAILSAFE, f"Camera: {self._data_reason}", _auto=True)
+        elif healthy and self._mode == SystemMode.FAILSAFE and self._failsafe_auto:
+            self.set_mode(SystemMode.AUTO)
+            logger.info("Camera data restored - back to AUTO")
+
+    def set_mode(self, mode: SystemMode, reason: Optional[str] = None, _auto: bool = False) -> None:
+        if mode == SystemMode.AUTO and not self._data_healthy:
+            mode, reason, _auto = SystemMode.FAILSAFE, f"Camera: {self._data_reason}", True   # cannot go AUTO blind
         prev = self._mode
         self._mode = mode
+        self._failsafe_auto = _auto and mode == SystemMode.FAILSAFE
         if mode == SystemMode.FAILSAFE:
             self._failsafe_reason = reason or "Unknown reason"
             self._apply_failsafe_phases()

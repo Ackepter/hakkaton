@@ -61,6 +61,8 @@ class SimStateExporter:
             p_el.set("state", str(p.get("state", "walking_to_crossing")))
             p_el.set("position_m", str(round(float(p.get("position_m", 0)), 2)))
             p_el.set("wait_time", str(round(float(p.get("wait_time", 0)), 2)))
+            p_el.set("direction", str(int(p.get("direction", 1))))
+            p_el.set("offset", str(round(float(p.get("offset", 0.0)), 2)))
 
         # <metrics>
         metrics = state.get("metrics", {})

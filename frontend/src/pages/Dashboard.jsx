@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
-import { controlApi, lightsApi } from '../api/client'
+import api, { controlApi, lightsApi } from '../api/client'
+import CameraView from '../components/CameraView'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, Legend
@@ -62,6 +63,23 @@ export default function Dashboard() {
   const [failsafeReason, setFailsafeReason] = useState(null)
   const [lights, setLights] = useState([])
   const [simRunning, setSimRunning] = useState(false)
+  const [siLights, setSiLights] = useState([])
+
+  // Smart Intersection lights (XML -> backend parser -> JSON). Shown when the backend controller has none.
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const r = await api.get('/api/si/state')
+        if (alive) setSiLights((r.data.lights || []).map(l => ({ ...l, time_remaining: 0, from_si: true })))
+      } catch {
+        if (alive) setSiLights([])
+      }
+    }
+    load()
+    const t = setInterval(load, 1500)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
 
   useEffect(() => {
     if (!lastMessage || lastMessage.type !== 'state_update') return
@@ -109,6 +127,7 @@ export default function Dashboard() {
     } catch {}
   }
 
+  const shownLights = lights.length ? lights : siLights
   const traffic = wsData?.metrics?.traffic || {}
   const system = wsData?.metrics?.system || {}
   const extra = wsData?.metrics?.extra || {}
@@ -154,14 +173,19 @@ export default function Dashboard() {
       </div>
 
       <div style={s.row}>
-        {/* Traffic lights panel */}
+        {/* Camera with recognition results (left) */}
+        <div style={{ flex: '1 1 380px', maxWidth: 560, minWidth: 300 }}>
+          <CameraView />
+        </div>
+
+        {/* Traffic lights panel (right) */}
         <div style={{ ...s.card, minWidth: 280, flex: '0 0 auto' }}>
-          <div style={s.cardTitle}>🚦 Светофоры</div>
-          {lights.length === 0 && (
-            <div style={{ color: '#718096', fontSize: 13 }}>Нет светофоров — создайте их в Конструкторе</div>
+          <div style={s.cardTitle}>🚦 Светофоры{shownLights.length > 0 && shownLights[0].from_si ? ' · Smart Intersection' : ''}</div>
+          {shownLights.length === 0 && (
+            <div style={{ color: '#718096', fontSize: 13 }}>Нет данных о светофорах (запустите Smart Intersection)</div>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {lights.map(light => (
+            {shownLights.map(light => (
               <div key={light.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#131722', borderRadius: 8, padding: '8px 12px' }}>
                 <TrafficLightBulb state={light.state} size={20} />
                 <div style={{ flex: 1 }}>
@@ -170,7 +194,7 @@ export default function Dashboard() {
                     {light.direction || '—'} · фаза {light.phase_index + 1}
                   </div>
                   <div style={{ fontSize: 11, color: '#718096' }}>
-                    Осталось: {Math.round(light.time_remaining)}с
+                    {light.from_si ? `переключений: ${light.phase_switches}` : `Осталось: ${Math.round(light.time_remaining)}с`}
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -179,7 +203,7 @@ export default function Dashboard() {
                     background: LIGHT_COLORS[light.state] + '22', color: LIGHT_COLORS[light.state]
                   }}>{light.state}</div>
                 </div>
-                {mode === 'MANUAL' && (
+                {mode === 'MANUAL' && !light.from_si && (
                   <div style={{ display: 'flex', gap: 3 }}>
                     {['RED', 'YELLOW', 'GREEN'].map(st => (
                       <button key={st}
@@ -293,8 +317,8 @@ export default function Dashboard() {
 
 function StatusDot({ label, status, value, color }) {
   const statusColor = {
-    simulation: '#f6e05e', active: '#68d391', ok: '#68d391',
-    error: '#fc8181', unavailable: '#fc8181', unknown: '#718096',
+    simulation: '#f6e05e', active: '#68d391', ok: '#68d391', connected: '#68d391', connecting: '#f6e05e',
+    error: '#fc8181', unavailable: '#fc8181', no_signal: '#fc8181', disconnected: '#fc8181', unknown: '#718096',
   }[status] || color || '#68d391'
 
   return (

@@ -54,7 +54,7 @@ def test_never_both_groups_non_red():
 
 
 def test_failsafe_uses_fixed_twenty_second_greens():
-    e = make_engine("failsafe")
+    e = make_engine("normal", control_mode="failsafe")
     assert e.control_mode == "failsafe"
     greens = [d for idx, d in phase_log(e, 300) if idx in (0, 3)]
     assert len(greens) >= 4
@@ -190,3 +190,124 @@ def test_all_red_lasts_until_a_slow_long_vehicle_has_cleared_the_box():
         if e._phase_index == 3 and e._group_in_conflict_zone("ns"):
             ew_green_with_tram_in_zone += 1
     assert ew_green_with_tram_in_zone == 0
+
+
+# ──── camera perception channel ────
+
+def test_signals_follow_camera_data_instead_of_ground_truth():
+    """Cars are queued on north/south, but the camera reports demand only on east -> NS green is cut at MIN_GREEN."""
+    e = make_engine("normal", spawn_rate=30.0, ped_spawn_rate=0.0,
+                    direction_probs={"north": 0.5, "south": 0.5, "east": 0.0, "west": 0.0})
+    e.set_perception({"camera_ok": True, "vehicles": {"east": 4}})
+    log = []
+    last = e._phase_index
+    start = e.sim_time
+    for _ in range(300):
+        e.set_perception({"camera_ok": True, "vehicles": {"east": 4}})     # camera keeps reporting
+        e._tick(0.1)
+        if e._phase_index != last:
+            log.append((last, round(e.sim_time - start, 1)))
+            break
+    assert log and log[0][0] == 0 and log[0][1] == pytest.approx(MIN_GREEN, abs=0.3)
+
+
+def test_stale_camera_data_triggers_failsafe_and_recovers_when_data_returns():
+    e = idle()
+    e.set_perception({"camera_ok": True})
+    assert e.failsafe_reason() is None
+    e.advance(5)                                          # no new data for > 3 s
+    assert e.failsafe_reason() == "camera data lost"
+    e.set_perception({"camera_ok": True})
+    assert e.failsafe_reason() is None
+
+
+def test_camera_reported_unavailable_gives_fixed_greens():
+    e = idle()
+    e.set_perception({"camera_ok": False})
+    greens = []
+    last, start = e._phase_index, e.sim_time
+    for _ in range(3000):
+        e.set_perception({"camera_ok": False})
+        e._tick(0.1)
+        if e._phase_index != last:
+            if last in (0, 3):
+                greens.append(round(e.sim_time - start, 1))
+            last, start = e._phase_index, e.sim_time
+    assert e.failsafe_reason() == "camera unavailable"
+    assert len(greens) >= 3 and all(g == pytest.approx(FAILSAFE_GREEN, abs=0.2) for g in greens)
+
+
+def test_perception_staleness_is_scaled_by_time_scale():
+    e = idle(time_scale=10)
+    e.set_perception({"camera_ok": True})
+    e.advance(20)                                         # 20 sim-s = 2 real s at 10x, inside 3 s * 10
+    assert e.failsafe_reason() is None
+    e.advance(15)
+    assert e.failsafe_reason() == "camera data lost"
+
+
+def test_clear_perception_returns_to_ground_truth():
+    e = idle()
+    e.set_perception({"camera_ok": False})
+    e.clear_perception()
+    assert e.failsafe_reason() is None and e.get_state()["perception"]["active"] is False
+
+
+def test_camera_failure_flag_and_reset():
+    e = idle()
+    e.configure(camera_failure=True)
+    assert e.failsafe_reason() == "camera failure"
+    e.set_perception({"camera_ok": True})
+    assert not e._perception_usable()                     # a pushed frame does not help while unplugged
+    import asyncio
+    asyncio.run(e.reset())
+    assert e.failsafe_reason() is None and e._perception is None
+
+
+# ──── pedestrian priority (Task 13) ────
+
+def _crowd(e, crossing="PC-N", n=6, direction=1):
+    from smart_intersection.engine.models import Pedestrian
+    for i in range(n):
+        p = Pedestrian(f"crowd-{crossing}-{i}", crossing, "waiting_for_green", 0.0, 0.0, direction=direction,
+                       offset=-1.2 + 0.3 * i)
+        e._pedestrians[p.id] = p
+
+
+def _first_green_length(e, max_s=70):
+    last, start, seen = e._phase_index, e.sim_time, None
+    for _ in range(int(max_s * 10)):
+        e._tick(0.1)
+        if e._phase_index != last:
+            return round(e.sim_time - start, 1)
+    return None
+
+
+def test_crowd_of_pedestrians_cuts_the_conflicting_green_short():
+    """North/south cars keep NS green until MAX; a crowd waiting on PC-N (served by EW green) ends it at MIN_GREEN."""
+    kw = dict(spawn_rate=30.0, ped_spawn_rate=0.0, direction_probs={"north": 0.5, "south": 0.5, "east": 0.0, "west": 0.0})
+    calm = make_engine("normal", **kw)
+    assert _first_green_length(calm) == pytest.approx(MAX_GREEN, abs=0.3)
+    crowded = make_engine("normal", **kw)
+    _crowd(crowded)
+    assert _first_green_length(crowded) == pytest.approx(MIN_GREEN, abs=0.3)
+
+
+def test_a_small_group_of_pedestrians_does_not_trigger_priority():
+    e = make_engine("normal", spawn_rate=30.0, ped_spawn_rate=0.0,
+                    direction_probs={"north": 0.5, "south": 0.5, "east": 0.0, "west": 0.0})
+    _crowd(e, n=2)
+    assert _first_green_length(e) > MIN_GREEN + 5
+
+
+def test_pedestrian_priority_also_works_from_the_camera_flag():
+    e = make_engine("normal", spawn_rate=30.0, ped_spawn_rate=0.0,
+                    direction_probs={"north": 0.5, "south": 0.5, "east": 0.0, "west": 0.0})
+    last, start = e._phase_index, e.sim_time
+    for _ in range(700):
+        e.set_perception({"camera_ok": True, "vehicles": {"north": 3}, "pedestrians_waiting": {"PC-N": 6},
+                          "ped_priority": {"PC-N": True}})
+        e._tick(0.1)
+        if e._phase_index != last:
+            break
+    assert e.sim_time - start == pytest.approx(MIN_GREEN, abs=0.3)

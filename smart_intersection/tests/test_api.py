@@ -223,3 +223,35 @@ def test_websocket_disconnect_is_cleaned_up(client):
 def test_two_websocket_clients_receive_independently(client):
     with client.websocket_connect("/ws/state") as a, client.websocket_connect("/ws/state") as b:
         assert a.receive_json()["intersection_id"] == b.receive_json()["intersection_id"] == "SI-001"
+
+
+# ──── camera failure + perception channel ────
+
+def test_camera_feed_returns_xml_and_503_while_camera_is_unplugged(client):
+    assert client.get("/sensor/camera-feed").status_code == 200
+    assert client.post("/simulation/camera-failure", json={"active": True}).json() == {"camera_failure": True}
+    assert client.get("/sensor/camera-feed").status_code == 503
+    assert client.get("/xml/state").status_code == 200            # the Dashboard XML stays available
+    client.post("/simulation/camera-failure", json={"active": False})
+    assert client.get("/sensor/camera-feed").status_code == 200
+
+
+def test_camera_failure_puts_signals_in_failsafe(client, engine):
+    client.post("/simulation/camera-failure", json={"active": True})
+    s = client.get("/simulation/state").json()
+    assert s["failsafe_reason"] == "camera failure" and s["camera_failure"] is True
+
+
+def test_perception_push_and_clear(client, engine):
+    assert client.get("/simulation/state").json()["perception"]["active"] is False
+    r = client.post("/perception", json={"camera_ok": True, "vehicles": {"east": 3}})
+    assert r.status_code == 200 and r.json()["failsafe_reason"] is None
+    assert client.get("/simulation/state").json()["perception"] == {"active": True, "camera_ok": True, "stale": False}
+    r = client.post("/perception", json={"camera_ok": False})
+    assert r.json()["failsafe_reason"] == "camera unavailable"
+    assert client.delete("/perception").json() == {"active": False}
+    assert client.get("/simulation/state").json()["failsafe_reason"] is None
+
+
+def test_perception_rejects_bad_payload(client):
+    assert client.post("/perception", json={"vehicles": {"east": "many"}}).status_code == 422

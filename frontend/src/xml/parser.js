@@ -80,6 +80,8 @@ function parsePedestrians(root) {
       state: el.getAttribute('state'),
       position_m: parseFloat(el.getAttribute('position_m') || '0'),
       wait_time: parseFloat(el.getAttribute('wait_time') || '0'),
+      direction: parseInt(el.getAttribute('direction') || '1', 10),
+      offset: parseFloat(el.getAttribute('offset') || '0'),
     })
   })
   return peds

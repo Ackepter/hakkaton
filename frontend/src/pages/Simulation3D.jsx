@@ -6,6 +6,8 @@ import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 import IntersectionScene from '../components/scene/IntersectionScene'
 import SimControls from '../components/scene/SimControls'
+import CameraView from '../components/CameraView'
+import useVision from '../hooks/useVision'
 
 const WS_URL  = 'ws://localhost:8001/ws/state'
 const API_URL = 'http://localhost:8001/simulation/state'
@@ -18,6 +20,8 @@ export default function Simulation3D() {
   const [simState, setSimState]   = useState(null)
   const [connected, setConnected] = useState(false)
   const [error, setError]         = useState(null)
+  const { vision } = useVision()
+  const camera = vision?.cameras?.[0] ?? null
   const wsRef   = useRef(null)
   const pollRef = useRef(null)
 
@@ -83,12 +87,14 @@ export default function Simulation3D() {
         background: '#111827', borderRight: '1px solid #1e293b',
         padding: 12,
       }}>
-        <SimControls simStatus={status} metrics={metrics} />
+        <SimControls simStatus={status} metrics={metrics} cameraFailure={!!simState?.camera_failure}
+                     failsafeReason={simState?.failsafe_reason ?? null} />
       </aside>
 
       {/* Centre — 3D canvas (fills all remaining space) */}
       <main style={{ flex: 1, position: 'relative', minWidth: 0, height: '100%' }}>
-        <IntersectionScene vehicles={vehicles} pedestrians={pedestrians} lights={lights} />
+        <IntersectionScene vehicles={vehicles} pedestrians={pedestrians} lights={lights}
+                           camera={camera} cameraHealthy={vision ? vision.healthy : true} />
 
         {/* HUD overlay */}
         <div style={{
@@ -104,6 +110,9 @@ export default function Simulation3D() {
           </div>
           <div>Sim time: {simTime.toFixed(1)}s</div>
           <div>Speed: {simState?.time_scale ?? 1}×</div>
+          <div style={{ color: simState?.failsafe_reason ? '#fca5a5' : '#86efac' }}>
+            Signals: {simState?.failsafe_reason ? `FAILSAFE (${simState.failsafe_reason})` : 'AUTO'}
+          </div>
         </div>
 
         {error && (
@@ -119,10 +128,12 @@ export default function Simulation3D() {
 
       {/* Right panel — metrics */}
       <aside style={{
-        width: 170, flexShrink: 0, overflowY: 'auto',
+        width: 300, flexShrink: 0, overflowY: 'auto',
         background: '#111827', borderLeft: '1px solid #1e293b',
         padding: 12, color: '#e2e8f0', fontSize: 11,
       }}>
+        <div style={{ marginBottom: 12 }}><CameraView compact /></div>
+
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: '#f1f5f9' }}>
           Live Metrics
         </div>

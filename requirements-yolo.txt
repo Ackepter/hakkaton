@@ -1,0 +1,4 @@
+# Optional: local YOLO object detection (CPU only, no CUDA).
+# Heavy: install only when detector: yolo is used. Not needed for Simulation Mode.
+# On a Raspberry Pi 3B+ prefer a small model (yolov8n) with imgsz 320 and low fps, or run vision on another PC.
+ultralytics>=8.1.0
