@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified">
+
+  <!-- Root element -->
+  <xs:element name="intersectionSimulation">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="simulation"    type="SimulationType"/>
+        <xs:element name="trafficLights" type="TrafficLightsType"/>
+        <xs:element name="vehicles"      type="VehiclesType"/>
+        <xs:element name="pedestrians"   type="PedestriansType"/>
+        <xs:element name="metrics"       type="MetricsType"/>
+      </xs:sequence>
+      <xs:attribute name="version"   type="xs:string"  use="required"/>
+      <xs:attribute name="timestamp" type="xs:decimal" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <!-- Simulation metadata -->
+  <xs:complexType name="SimulationType">
+    <xs:attribute name="id"          type="xs:string"  use="required"/>
+    <xs:attribute name="status"      type="StatusEnum" use="required"/>
+    <xs:attribute name="sim_time"    type="xs:decimal" use="required"/>
+    <xs:attribute name="time_scale"  type="xs:decimal" use="required"/>
+    <xs:attribute name="scenario"    type="xs:string"  use="required"/>
+    <xs:attribute name="seed"        type="xs:integer" use="required"/>
+  </xs:complexType>
+
+  <xs:simpleType name="StatusEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="running"/>
+      <xs:enumeration value="paused"/>
+      <xs:enumeration value="stopped"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Traffic lights -->
+  <xs:complexType name="TrafficLightsType">
+    <xs:sequence>
+      <xs:element name="light" type="LightType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="LightType">
+    <xs:attribute name="id"            type="xs:string"    use="required"/>
+    <xs:attribute name="direction"     type="DirectionEnum" use="required"/>
+    <xs:attribute name="state"         type="LightStateEnum" use="required"/>
+    <xs:attribute name="phase_index"   type="xs:integer"   use="required"/>
+    <xs:attribute name="phase_switches" type="xs:integer"  use="required"/>
+  </xs:complexType>
+
+  <xs:simpleType name="DirectionEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="north"/>
+      <xs:enumeration value="south"/>
+      <xs:enumeration value="east"/>
+      <xs:enumeration value="west"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="LightStateEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="RED"/>
+      <xs:enumeration value="YELLOW"/>
+      <xs:enumeration value="GREEN"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Vehicles -->
+  <xs:complexType name="VehiclesType">
+    <xs:sequence>
+      <xs:element name="vehicle" type="VehicleType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="count" type="xs:integer" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="VehicleType">
+    <xs:attribute name="id"           type="xs:string"  use="required"/>
+    <xs:attribute name="type"         type="xs:string"  use="required"/>
+    <xs:attribute name="lane_id"      type="xs:string"  use="required"/>
+    <xs:attribute name="direction"    type="DirectionEnum" use="required"/>
+    <xs:attribute name="position_m"   type="xs:decimal" use="required"/>
+    <xs:attribute name="speed_mps"    type="xs:decimal" use="required"/>
+    <xs:attribute name="state"        type="VehicleStateEnum" use="required"/>
+    <xs:attribute name="wait_time"    type="xs:decimal" use="required"/>
+  </xs:complexType>
+
+  <xs:simpleType name="VehicleStateEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="driving"/>
+      <xs:enumeration value="decelerating"/>
+      <xs:enumeration value="waiting"/>
+      <xs:enumeration value="passing"/>
+      <xs:enumeration value="finished"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Pedestrians -->
+  <xs:complexType name="PedestriansType">
+    <xs:sequence>
+      <xs:element name="pedestrian" type="PedestrianType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="count" type="xs:integer" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="PedestrianType">
+    <xs:attribute name="id"          type="xs:string"  use="required"/>
+    <xs:attribute name="crossing_id" type="xs:string"  use="required"/>
+    <xs:attribute name="state"       type="PedStateEnum" use="required"/>
+    <xs:attribute name="position_m"  type="xs:decimal" use="required"/>
+    <xs:attribute name="wait_time"   type="xs:decimal" use="required"/>
+    <xs:attribute name="direction"   type="xs:integer" use="optional"/>
+    <xs:attribute name="offset"      type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <xs:simpleType name="PedStateEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="walking_to_crossing"/>
+      <xs:enumeration value="waiting_for_green"/>
+      <xs:enumeration value="crossing"/>
+      <xs:enumeration value="finished"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Metrics -->
+  <xs:complexType name="MetricsType">
+    <xs:attribute name="vehicles_active"    type="xs:integer" use="required"/>
+    <xs:attribute name="vehicles_waiting"   type="xs:integer" use="required"/>
+    <xs:attribute name="passed_total"       type="xs:integer" use="required"/>
+    <xs:attribute name="avg_wait_s"         type="xs:decimal" use="required"/>
+    <xs:attribute name="max_wait_s"         type="xs:decimal" use="required"/>
+    <xs:attribute name="throughput_per_min" type="xs:decimal" use="required"/>
+    <xs:attribute name="congestion_pct"     type="xs:decimal" use="required"/>
+    <xs:attribute name="efficiency_pct"     type="xs:decimal" use="required"/>
+  </xs:complexType>
+
+</xs:schema>

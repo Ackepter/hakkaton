@@ -1,0 +1,58 @@
+# Camera configuration (Task 10-12, 34.9-34.11).
+# Every value here can differ between WSL / PC and the Raspberry Pi, so nothing camera related lives in the code.
+#
+# source:   simulation | usb | file | network | image
+# detector: virtual (Simulation Mode: the simulation reports what it "sees")
+#           yolo    (local YOLO through ultralytics, CPU only)  -> pip install -r requirements-yolo.txt
+#           none    (image only, no analysis -> system stays in FAILSAFE)
+# zones:    polygons in normalised image coordinates (0..1, origin top-left). Lane zones are counted for vehicles,
+#           pedestrian zones for people. A simulation camera generates its zones automatically.
+#
+# A camera is NOT required to start the backend or the Dashboard.
+
+cameras:
+  - id: CAM-01
+    name: Overhead camera (simulation)
+    source: simulation
+    uri: http://127.0.0.1:8001        # Smart Intersection service (virtual camera output)
+    detector: virtual
+    fps: 5
+    width: 640
+    height: 640
+    confidence: 0.5
+    timeout_s: 2.0                    # no frame for this long -> camera lost -> FAILSAFE
+    reconnect_s: 3.0
+
+# ---- examples: replace the block above (or add cameras) when moving to real hardware -----------------------------
+#
+#  - id: CAM-USB
+#    name: Intersection USB camera
+#    source: usb
+#    uri: "0"                        # device index (Windows / Linux / Raspberry Pi)
+#    detector: yolo
+#    model_path: models/yolov8n.pt   # any local YOLO weights; a fine-tuned model can replace it later
+#    device: cpu                     # no CUDA required
+#    imgsz: 320                      # smaller input = faster on a Raspberry Pi 3B+
+#    fps: 3
+#    width: 640
+#    height: 480
+#    confidence: 0.45
+#    classes: [person, car, truck, bus, tram, motorcycle, bicycle, emergency]
+#    class_map:                      # extra names of a custom model -> project classes
+#      ambulance: emergency
+#      police car: emergency
+#      fire truck: emergency
+#    zones:
+#      - {id: north-in, kind: lane,       direction: north, capacity: 8,  polygon: [[0.40,0.05],[0.55,0.05],[0.55,0.45],[0.40,0.45]]}
+#      - {id: east-in,  kind: lane,       direction: east,  capacity: 8,  polygon: [[0.60,0.45],[0.95,0.45],[0.95,0.60],[0.60,0.60]]}
+#      - {id: PC-N,     kind: pedestrian, direction: north, capacity: 10, polygon: [[0.20,0.70],[0.80,0.70],[0.80,0.85],[0.20,0.85]]}
+#
+#  - id: CAM-FILE                    # WSL / development: test computer vision without a physical camera
+#    source: file
+#    uri: videos/intersection.mp4
+#    detector: yolo
+#
+#  - id: CAM-NET
+#    source: network
+#    uri: rtsp://user:password@192.168.1.50:554/stream
+#    detector: yolo
