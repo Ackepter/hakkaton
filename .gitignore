@@ -1,29 +1,37 @@
 # Python
 .venv/
+venv/
 __pycache__/
 *.py[cod]
-*.pyo
 *.pyd
 .Python
 *.egg-info/
+*.egg
+.eggs/
 dist/
 build/
-.eggs/
-*.egg
 
-# Environment
+# Environment (keep the template)
 .env
+.env.*
+!.env.example
 *.local
 
-# Pytest
+# Test / lint caches
 .pytest_cache/
 .coverage
 htmlcov/
+.ruff_cache/
+.mypy_cache/
 
 # Node / Frontend
-frontend/node_modules/
+node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/.env*
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
 
 # IDE
 .vscode/
@@ -31,20 +39,23 @@ frontend/.vite/
 *.swp
 *.swo
 
+# AI assistant local state
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+nul
 
-# Logs
+# Logs and temp files
 *.log
 logs/
+*.tmp
 
-# Config (runtime-generated)
+# Runtime-generated config
 config/intersection.json
 
 # YOLO models (large binaries)
 models/*.pt
 models/*.onnx
-
-# Raspberry Pi
-*.pyc
