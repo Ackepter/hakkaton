@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import Constructor from './pages/Constructor'
 import Dashboard from './pages/Dashboard'
+import Simulation3D from './pages/Simulation3D'
 
 const styles = {
   nav: {
@@ -29,10 +30,14 @@ export default function App() {
         <NavLink to="/dashboard" style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
           Dashboard
         </NavLink>
+        <NavLink to="/simulation" style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
+          3D Simulation
+        </NavLink>
       </nav>
       <Routes>
         <Route path="/" element={<Constructor />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/simulation" element={<Simulation3D />} />
       </Routes>
     </BrowserRouter>
   )

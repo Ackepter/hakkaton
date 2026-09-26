@@ -12,6 +12,7 @@ import os
 
 from .config.settings import settings
 from .api import intersection_router, lights_router, control_router, metrics_router
+from .api.routes_si import router as si_router
 from .core import app_state
 from .models.schemas import IntersectionConfig, SystemMode
 
@@ -69,6 +70,7 @@ app.include_router(intersection_router)
 app.include_router(lights_router)
 app.include_router(control_router)
 app.include_router(metrics_router)
+app.include_router(si_router)
 
 
 async def broadcast_loop():
