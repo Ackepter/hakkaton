@@ -113,6 +113,15 @@ async def analysis():
     return snap.to_dict() if snap else None
 
 
+@router.post("/sync-layout")
+async def sync_layout():
+    """Rebuild the simulation cameras from the current simulation layout (call after the constructor applied it)."""
+    result = await app_state.sync_layout_cameras()
+    if result is None:
+        raise HTTPException(status_code=503, detail="simulation service unreachable")
+    return result
+
+
 @router.get("/discover")
 async def discover():
     """USB cameras visible to OpenCV (empty when none / OpenCV missing)."""

@@ -255,3 +255,123 @@ def test_perception_push_and_clear(client, engine):
 
 def test_perception_rejects_bad_payload(client):
     assert client.post("/perception", json={"vehicles": {"east": "many"}}).status_code == 422
+
+
+# ──── constructor: layout API ────
+
+def test_get_layout_returns_the_default_crossroads(client):
+    d = client.get("/layout").json()
+    assert d["name"] == "Crossroads" and all(d["arms"][a]["enabled"] for a in ("north", "south", "east", "west"))
+    assert len(d["scenery"]) == 24
+
+
+def _layout(client, **edit):
+    d = client.get("/layout").json()
+    for k, v in edit.items():
+        d[k] = v
+    return d
+
+
+def test_apply_layout_rebuilds_the_world_and_stops_the_simulation(client, engine):
+    client.post("/simulation/start")
+    d = _layout(client, name="No south")
+    d["arms"]["south"]["enabled"] = False
+    r = client.put("/layout", json=d)
+    assert r.status_code == 200 and r.json()["name"] == "No south"
+    s = client.get("/simulation/state").json()
+    assert s["status"] == "stopped" and s["layout_name"] == "No south" and s["sim_time"] == 0
+    assert {l["id"] for l in s["lights"]} == {"TL-N", "TL-E", "TL-W"}
+    assert client.get("/layout").json()["arms"]["south"]["enabled"] is False
+
+
+def test_invalid_layout_is_rejected_with_reasons_and_changes_nothing(client):
+    d = _layout(client)
+    d["scenery"].append({"id": "oops", "type": "building", "x": 0, "z": -40})
+    r = client.put("/layout", json=d)
+    assert r.status_code == 422 and any("oops" in e for e in r.json()["detail"])
+    assert client.get("/layout").json()["name"] == "Crossroads"
+    r = client.post("/layout/validate", json=d)
+    assert r.status_code == 200 and r.json()["valid"] is False and r.json()["errors"]
+    assert client.post("/layout/validate", json=_layout(client)).json() == {"valid": True, "errors": []}
+
+
+@pytest.mark.parametrize("edit", [
+    {"arms": {"north": {"length_m": 5}}}, {"name": "../x"}, {"signal": {"mode": "chaos"}}, {"traffic": {"spawn_rate": -1}},
+])
+def test_malformed_layout_is_422(client, edit):
+    assert client.put("/layout", json=edit).status_code == 422
+
+
+def test_colliding_signal_program_is_rejected(client):
+    d = _layout(client)
+    d["signal"] = {"mode": "fixed", "program": [{"ns": "GREEN", "ew": "GREEN", "duration": 10}]}
+    r = client.put("/layout", json=d)
+    assert r.status_code == 422 and any("same time" in e for e in r.json()["detail"])
+
+
+def test_layouts_can_be_saved_listed_loaded_and_deleted(client):
+    assert client.get("/layouts").json()["saved"] == []
+    assert "T-junction" in client.get("/layouts").json()["presets"]
+    d = _layout(client, name="My city")
+    assert client.post("/layouts", json=d).json() == {"saved": "My city"}
+    assert client.get("/layouts").json()["saved"] == ["My city"]
+    assert client.get("/layouts/My city").json()["name"] == "My city"
+    assert client.delete("/layouts/My city").json() == {"deleted": "My city"}
+    assert client.get("/layouts/My city").status_code == 404
+    assert client.delete("/layouts/My city").status_code == 404
+
+
+@pytest.mark.parametrize("name", ["..%2Fsecret", "a%5Cb", ".hidden", "x" * 60])
+def test_dangerous_layout_names_are_refused(client, name):
+    assert client.get(f"/layouts/{name}").status_code in (404, 422)
+    assert client.delete(f"/layouts/{name}").status_code in (404, 422)
+
+
+def test_presets_endpoint_returns_valid_ready_to_apply_layouts(client):
+    presets = client.get("/layout/presets").json()
+    assert {"Crossroads", "T-junction", "Tram avenue", "Bus street", "Two-way street"} <= set(presets)
+    for name, l in presets.items():
+        assert client.post("/layout/validate", json=l).json()["valid"], name
+        assert client.put("/layout", json=l).status_code == 200, name
+
+
+def test_applied_layout_is_remembered_across_restarts(client):
+    d = _layout(client, name="Remembered")
+    d["arms"]["west"]["enabled"] = False
+    client.put("/layout", json=d)
+    with TestClient(app) as second:                               # a fresh service start
+        s = second.get("/simulation/state").json()
+        assert s["layout_name"] == "Remembered"
+        assert {l["id"] for l in s["lights"]} == {"TL-N", "TL-S", "TL-E"}
+
+
+def test_broken_remembered_layout_falls_back_to_the_default(client):
+    import os
+    d = os.environ["SI_LAYOUT_DIR"]
+    open(os.path.join(d, "Bad.json"), "w").write("{oops")
+    open(os.path.join(d, ".last"), "w").write("Bad")
+    with TestClient(app) as second:
+        assert second.get("/simulation/state").json()["layout_name"] == "Crossroads"
+
+
+def test_interactive_spawn_endpoint(client, engine):
+    client.post("/simulation/config", json={"spawn_rate": 0, "ped_spawn_rate": 0})
+    r = client.post("/simulation/spawn", json={"kind": "vehicle", "arm": "east", "type": "bus"})
+    assert r.status_code == 200 and r.json()["id"].startswith("bus-")
+    assert client.post("/simulation/spawn", json={"kind": "vehicle", "arm": "east", "type": "bus"}).status_code == 409
+    assert client.post("/simulation/spawn", json={"kind": "vehicle", "arm": "east", "type": "dragon"}).status_code == 409
+    assert client.post("/simulation/spawn", json={"kind": "vehicle"}).status_code == 404
+    assert client.post("/simulation/spawn", json={"kind": "pedestrian", "crossing": "PC-N"}).status_code == 200
+    assert client.post("/simulation/spawn", json={"kind": "pedestrian", "crossing": "PC-X"}).status_code == 404
+    assert client.post("/simulation/spawn", json={"kind": "pedestrian"}).status_code == 404
+    assert client.post("/simulation/spawn", json={"kind": "rocket"}).status_code == 422
+    s = client.get("/simulation/state").json()
+    assert len(s["vehicles"]) == 1 and len(s["pedestrians"]) == 1
+
+
+def test_spawning_on_a_missing_arm_is_404(client):
+    d = _layout(client, name="T")
+    d["arms"]["south"]["enabled"] = False
+    client.put("/layout", json=d)
+    assert client.post("/simulation/spawn", json={"kind": "vehicle", "arm": "south"}).status_code == 404
+    assert client.post("/simulation/spawn", json={"kind": "pedestrian", "crossing": "PC-S"}).status_code == 404

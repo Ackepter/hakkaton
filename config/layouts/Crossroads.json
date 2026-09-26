@@ -1,0 +1,338 @@
+{
+  "version": 1,
+  "name": "Crossroads",
+  "arms": {
+    "north": {
+      "enabled": true,
+      "length_m": 80.0,
+      "lane_type": "mixed",
+      "speed_limit_mps": 13.9,
+      "crossing": true,
+      "weight": 1.0
+    },
+    "south": {
+      "enabled": true,
+      "length_m": 80.0,
+      "lane_type": "mixed",
+      "speed_limit_mps": 13.9,
+      "crossing": true,
+      "weight": 1.0
+    },
+    "east": {
+      "enabled": true,
+      "length_m": 80.0,
+      "lane_type": "mixed",
+      "speed_limit_mps": 13.9,
+      "crossing": true,
+      "weight": 1.0
+    },
+    "west": {
+      "enabled": true,
+      "length_m": 80.0,
+      "lane_type": "mixed",
+      "speed_limit_mps": 13.9,
+      "crossing": true,
+      "weight": 1.0
+    }
+  },
+  "signal": {
+    "mode": "adaptive",
+    "base_green": 30.0,
+    "min_green": 8.0,
+    "max_green": 60.0,
+    "yellow": 3.0,
+    "all_red": 3.0,
+    "program": [
+      {
+        "name": "NS green",
+        "ns": "GREEN",
+        "ew": "RED",
+        "duration": 30.0
+      },
+      {
+        "name": "NS yellow",
+        "ns": "YELLOW",
+        "ew": "RED",
+        "duration": 3.0
+      },
+      {
+        "name": "all red",
+        "ns": "RED",
+        "ew": "RED",
+        "duration": 3.0
+      },
+      {
+        "name": "EW green",
+        "ns": "RED",
+        "ew": "GREEN",
+        "duration": 30.0
+      },
+      {
+        "name": "EW yellow",
+        "ns": "RED",
+        "ew": "YELLOW",
+        "duration": 3.0
+      },
+      {
+        "name": "all red",
+        "ns": "RED",
+        "ew": "RED",
+        "duration": 3.0
+      }
+    ]
+  },
+  "traffic": {
+    "spawn_rate": 12.0,
+    "ped_spawn_rate": 5.0,
+    "type_probs": {
+      "car": 0.75,
+      "truck": 0.1,
+      "bus": 0.1,
+      "tram": 0.04,
+      "emergency": 0.01
+    }
+  },
+  "scenery": [
+    {
+      "id": "b1",
+      "type": "building",
+      "x": -60.0,
+      "z": -60.0,
+      "rotation_deg": 0.0,
+      "scale": 0.8,
+      "height": 8.0,
+      "color": "#6a98af"
+    },
+    {
+      "id": "b2",
+      "type": "building",
+      "x": 60.0,
+      "z": -60.0,
+      "rotation_deg": 0.0,
+      "scale": 1.1,
+      "height": 13.0,
+      "color": "#6a87af"
+    },
+    {
+      "id": "b3",
+      "type": "building",
+      "x": -60.0,
+      "z": 60.0,
+      "rotation_deg": 0.0,
+      "scale": 1.4,
+      "height": 18.0,
+      "color": "#6a75af"
+    },
+    {
+      "id": "b4",
+      "type": "building",
+      "x": 60.0,
+      "z": 60.0,
+      "rotation_deg": 0.0,
+      "scale": 0.8,
+      "height": 23.0,
+      "color": "#706aaf"
+    },
+    {
+      "id": "b5",
+      "type": "building",
+      "x": -90.0,
+      "z": -30.0,
+      "rotation_deg": 0.0,
+      "scale": 1.1,
+      "height": 8.0,
+      "color": "#816aaf"
+    },
+    {
+      "id": "b6",
+      "type": "building",
+      "x": 90.0,
+      "z": -30.0,
+      "rotation_deg": 0.0,
+      "scale": 1.4,
+      "height": 13.0,
+      "color": "#926aaf"
+    },
+    {
+      "id": "b7",
+      "type": "building",
+      "x": -90.0,
+      "z": 30.0,
+      "rotation_deg": 0.0,
+      "scale": 0.8,
+      "height": 18.0,
+      "color": "#a36aaf"
+    },
+    {
+      "id": "b8",
+      "type": "building",
+      "x": 90.0,
+      "z": 30.0,
+      "rotation_deg": 0.0,
+      "scale": 1.1,
+      "height": 23.0,
+      "color": "#af6aa9"
+    },
+    {
+      "id": "b9",
+      "type": "building",
+      "x": -30.0,
+      "z": -90.0,
+      "rotation_deg": 0.0,
+      "scale": 1.4,
+      "height": 8.0,
+      "color": "#af6a98"
+    },
+    {
+      "id": "b10",
+      "type": "building",
+      "x": 30.0,
+      "z": -90.0,
+      "rotation_deg": 0.0,
+      "scale": 0.8,
+      "height": 13.0,
+      "color": "#af6a87"
+    },
+    {
+      "id": "b11",
+      "type": "building",
+      "x": -30.0,
+      "z": 90.0,
+      "rotation_deg": 0.0,
+      "scale": 1.1,
+      "height": 18.0,
+      "color": "#af6a75"
+    },
+    {
+      "id": "b12",
+      "type": "building",
+      "x": 30.0,
+      "z": 90.0,
+      "rotation_deg": 0.0,
+      "scale": 1.4,
+      "height": 23.0,
+      "color": "#af706a"
+    },
+    {
+      "id": "t1",
+      "type": "tree",
+      "x": -22.0,
+      "z": -22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t2",
+      "type": "tree",
+      "x": 22.0,
+      "z": -22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t3",
+      "type": "tree",
+      "x": -22.0,
+      "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t4",
+      "type": "tree",
+      "x": 22.0,
+      "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t5",
+      "type": "tree",
+      "x": -22.0,
+      "z": -5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t6",
+      "type": "tree",
+      "x": -22.0,
+      "z": 5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t7",
+      "type": "tree",
+      "x": 22.0,
+      "z": -5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t8",
+      "type": "tree",
+      "x": 22.0,
+      "z": 5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t9",
+      "type": "tree",
+      "x": -5.0,
+      "z": -22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t10",
+      "type": "tree",
+      "x": 5.0,
+      "z": -22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t11",
+      "type": "tree",
+      "x": -5.0,
+      "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t12",
+      "type": "tree",
+      "x": 5.0,
+      "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    }
+  ],
+  "cameras": []
+}

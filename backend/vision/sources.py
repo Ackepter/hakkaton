@@ -62,11 +62,15 @@ class SimulationSource(CameraSource):
     """
     kind = "simulation"
 
-    def __init__(self, cfg: CameraConfig, fetch_xml: Optional[Callable[[], Optional[str]]] = None):
+    def __init__(self, cfg: CameraConfig, fetch_xml: Optional[Callable[[], Optional[str]]] = None,
+                 fetch_layout: Optional[Callable[[], Optional[dict]]] = None):
         super().__init__(cfg)
-        self._view = SimView(cfg.width, cfg.height)
+        self._view = SimView(cfg.width, cfg.height, cfg.view_radius_m, (cfg.view_x, cfg.view_z))
         self._fetch = fetch_xml or self._http_fetch
+        self._fetch_layout = fetch_layout or self._http_layout
         self._client: Optional[httpx.Client] = None
+        self._arms: Optional[dict] = None
+        self._arms_at = 0.0
         self.zones = self._view.default_zones()
 
     def _http_fetch(self) -> Optional[str]:
@@ -79,6 +83,25 @@ class SimulationSource(CameraSource):
             logger.debug("virtual camera feed unreachable: %s", e)
             return None
         return r.text if r.status_code == 200 else None
+
+    def _http_layout(self) -> Optional[dict]:
+        if self._client is None:
+            return None
+        try:
+            r = self._client.get("/layout")
+            return r.json()["arms"] if r.status_code == 200 else None
+        except (httpx.HTTPError, ValueError, KeyError):
+            return None
+
+    def _current_arms(self) -> Optional[dict]:
+        """The layout's arms, refreshed every few seconds so edits in the constructor show up in the picture."""
+        now = time.monotonic()
+        if now - self._arms_at > 3.0:
+            self._arms_at = now
+            arms = self._fetch_layout()
+            if arms:
+                self._arms = arms
+        return self._arms
 
     def open(self) -> None:
         self._open = True                       # the simulation may start later; loss shows up as "no signal"
@@ -93,7 +116,7 @@ class SimulationSource(CameraSource):
         except XmlParseError as e:
             logger.warning("virtual camera: bad XML: %s", e)
             return None
-        return self._frame(self._view.render(data, self.cfg.id), detections=self._view.detections(data),
+        return self._frame(self._view.render(data, self.cfg.id, self._current_arms()), detections=self._view.detections(data),
                            meta={"sim_time": data.simulation.sim_time, "status": data.simulation.status})
 
     def close(self) -> None:

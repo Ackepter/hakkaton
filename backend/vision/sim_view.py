@@ -8,7 +8,7 @@ World coordinates: x = west->east, z = north->south, metres, intersection centre
 The geometry constants intentionally mirror smart_intersection/engine/world.py; tests/test_vision_geometry.py
 fails if they drift apart (the two services must stay independent, so nothing is imported from the simulation).
 """
-from typing import List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -56,13 +56,19 @@ def pedestrian_world(crossing_id: str, position_m: float, direction: int = 1, of
 
 
 class SimView:
-    def __init__(self, width: int = 640, height: int = 640, radius_m: float = VIEW_RADIUS_M):
+    def __init__(self, width: int = 640, height: int = 640, radius_m: float = VIEW_RADIUS_M,
+                 center: Tuple[float, float] = (0.0, 0.0)):
         self.w, self.h = width, height
+        self.radius = radius_m
+        self.cx, self.cz = center
         self.scale = min(width, height) / (2 * radius_m)          # pixels per metre
 
     # -- projection
     def to_px(self, x: float, z: float) -> Tuple[float, float]:
-        return self.w / 2 + x * self.scale, self.h / 2 + z * self.scale
+        return self.w / 2 + (x - self.cx) * self.scale, self.h / 2 + (z - self.cz) * self.scale
+
+    def sees(self, x: float, z: float) -> bool:
+        return abs(x - self.cx) <= self.w / 2 / self.scale and abs(z - self.cz) <= self.h / 2 / self.scale
 
     def to_norm(self, x: float, z: float) -> Tuple[float, float]:
         px, py = self.to_px(x, z)
@@ -73,18 +79,26 @@ class SimView:
         return [min(a, c), min(b, d), max(a, c), max(b, d)]
 
     # -- zones: approach lanes before the stop line + crosswalk bands including the waiting area
-    def default_zones(self) -> List[Zone]:
+    def default_zones(self, arms: Optional[Iterable[str]] = None, crossings: Optional[Iterable[str]] = None,
+                      skip: Iterable[str] = ()) -> List[Zone]:
+        """Zones of the arms / crosswalks that exist (default: all) and whose centre this camera can see."""
         near, far = STOP_DIST, STOP_DIST + APPROACH_DEPTH
         boxes = {
             "north": (-LANE_WIDTH, -far, 0, -near), "south": (0, near, LANE_WIDTH, far),
             "east": (near, -LANE_WIDTH, far, 0), "west": (-far, 0, -near, LANE_WIDTH),
         }
-        zones = [Zone(f"{arm}-in", "lane", self._poly(*box), arm, capacity=8) for arm, box in boxes.items()]
+        skip = set(skip)
+        zones = []
+        for arm, box in boxes.items():
+            zid = f"{arm}-in"
+            if (arms is None or arm in arms) and zid not in skip and self.sees((box[0] + box[2]) / 2, (box[1] + box[3]) / 2):
+                zones.append(Zone(zid, "lane", self._poly(*box), arm, capacity=8))
         c, d, w = CROSS_CENTER, CROSS_DEPTH / 2, CROSS_WIDTH / 2 + 3
         bands = {"PC-N": ("north", -w, -c - d, w, -c + d), "PC-S": ("south", -w, c - d, w, c + d),
                  "PC-E": ("east", c - d, -w, c + d, w), "PC-W": ("west", -c - d, -w, -c + d, w)}
         for zid, (arm, x0, z0, x1, z1) in bands.items():
-            zones.append(Zone(zid, "pedestrian", self._poly(x0, z0, x1, z1), arm, capacity=10))
+            if (crossings is None or zid in crossings) and zid not in skip and self.sees((x0 + x1) / 2, (z0 + z1) / 2):
+                zones.append(Zone(zid, "pedestrian", self._poly(x0, z0, x1, z1), arm, capacity=10))
         return zones
 
     def _poly(self, x0, z0, x1, z1):
@@ -93,11 +107,10 @@ class SimView:
     # -- virtual detections
     def detections(self, data) -> List[Detection]:
         out: List[Detection] = []
-        half_w, half_h = self.w / 2 / self.scale, self.h / 2 / self.scale
         for v in data.vehicles:
             length, width = VEHICLE_SIZE.get(v.vehicle_type, VEHICLE_SIZE["car"])
             x, z = vehicle_world(v.direction, v.position_m)
-            if abs(x) > half_w or abs(z) > half_h:
+            if not self.sees(x, z):
                 continue                                              # outside the camera's field of view
             bw, bh = (width, length) if v.direction in ("north", "south") else (length, width)
             cx, cy = self.to_norm(x, z)
@@ -108,6 +121,8 @@ class SimView:
             if p.state == "finished":
                 continue
             x, z = pedestrian_world(p.crossing_id, p.position_m, p.direction, p.offset)
+            if not self.sees(x, z):
+                continue
             cx, cy = self.to_norm(x, z)
             size = max(1.0 * self.scale, 8)
             out.append(Detection(cls="person", confidence=0.95, x=cx, y=cy, w=size / self.w, h=size / self.h,
@@ -115,32 +130,39 @@ class SimView:
         return out
 
     # -- picture
-    def render(self, data, label: str = "CAM-01") -> Image.Image:
+    def render(self, data, label: str = "CAM-01", arms: Optional[Dict[str, dict]] = None) -> Image.Image:
+        """Top-down picture. `arms` = {arm: {enabled, length_m, crossing}} from the layout (default: full crossroads)."""
+        arms = arms or {a: {"enabled": True, "length_m": ARM_LENGTH, "crossing": True} for a in ARMS}
         img = Image.new("RGB", (self.w, self.h), (63, 125, 63))
         d = ImageDraw.Draw(img)
-        R = max(self.w, self.h) / self.scale
         road, side, line = (70, 70, 74), (150, 155, 160), (235, 235, 235)
-        for x0, z0, x1, z1 in ((-8, -R, 8, R), (-R, -8, R, 8)):        # asphalt arms
-            d.rectangle(self.rect_px(x0, z0, x1, z1), fill=road)
-        for sx in (-1, 1):                                              # sidewalks
-            d.rectangle(self.rect_px(sx * 4, -R, sx * 8, R), fill=side)
-            d.rectangle(self.rect_px(-R, sx * 4, R, sx * 8), fill=side)
-        d.rectangle(self.rect_px(-HALF, -HALF, HALF, HALF), fill=road)  # box on top of the sidewalks
-        for span in range(int(HALF + 4), int(R), 6):                    # centre dashes
-            for s in (-1, 1):
-                d.rectangle(self.rect_px(-0.1, s * span, 0.1, s * (span + 3)), fill=line)
-                d.rectangle(self.rect_px(s * span, -0.1, s * (span + 3), 0.1), fill=line)
         c, dp = CROSS_CENTER, CROSS_DEPTH / 2
-        for i in range(10):                                             # zebra stripes
-            o = -CROSS_WIDTH / 2 + 0.6 + i * (CROSS_WIDTH / 10)
-            for s in (-1, 1):
-                d.rectangle(self.rect_px(o - 0.3, s * c - dp, o + 0.3, s * c + dp), fill=(220, 220, 225))
-                d.rectangle(self.rect_px(s * c - dp, o - 0.3, s * c + dp, o + 0.3), fill=(220, 220, 225))
-        sl = STOP_DIST                                                  # stop lines on the inbound lanes
-        d.rectangle(self.rect_px(-LANE_WIDTH, -sl - 0.2, 0, -sl + 0.2), fill=line)
-        d.rectangle(self.rect_px(0, sl - 0.2, LANE_WIDTH, sl + 0.2), fill=line)
-        d.rectangle(self.rect_px(sl - 0.2, -LANE_WIDTH, sl + 0.2, 0), fill=line)
-        d.rectangle(self.rect_px(-sl - 0.2, 0, -sl + 0.2, LANE_WIDTH), fill=line)
+        # per arm: (axis sign, horizontal?) -> rectangles built in arm-local coordinates (u along the arm, v across)
+        def rect(arm, u0, u1, v0, v1):
+            if arm == "north":
+                return self.rect_px(v0, -u1, v1, -u0)
+            if arm == "south":
+                return self.rect_px(v0, u0, v1, u1)
+            if arm == "east":
+                return self.rect_px(u0, v0, u1, v1)
+            return self.rect_px(-u1, v0, -u0, v1)
+
+        d.rectangle(self.rect_px(-HALF - 4, -HALF - 4, HALF + 4, HALF + 4), fill=side)       # corner pavement
+        d.rectangle(self.rect_px(-HALF, -HALF, HALF, HALF), fill=road)                          # box
+        for arm, a in arms.items():
+            if not a.get("enabled", True):
+                continue
+            L = float(a.get("length_m", ARM_LENGTH))
+            d.rectangle(rect(arm, HALF, L, -8, 8), fill=side)
+            d.rectangle(rect(arm, HALF, L, -4, 4), fill=road)
+            for span in range(int(HALF + 4), int(L) - 3, 6):
+                d.rectangle(rect(arm, span, span + 3, -0.1, 0.1), fill=line)
+            if a.get("crossing", True):
+                for i in range(10):
+                    o = -CROSS_WIDTH / 2 + 0.6 + i * (CROSS_WIDTH / 10)
+                    d.rectangle(rect(arm, c - dp, c + dp, o - 0.3, o + 0.3), fill=(220, 220, 225))
+            lane = (0, LANE_WIDTH) if arm in ("south", "west") else (-LANE_WIDTH, 0)     # inbound lane side
+            d.rectangle(rect(arm, STOP_DIST - 0.2, STOP_DIST + 0.2, *lane), fill=line)
 
         for tl in data.lights:
             px, py = self.to_px(*LIGHT_POLE[tl.direction])

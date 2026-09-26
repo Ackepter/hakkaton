@@ -55,6 +55,9 @@ class CameraConfig:
     reconnect_s: float = 3.0
     zones: List[Zone] = field(default_factory=list)
     enabled: bool = True
+    view_x: float = 0.0                         # simulation cameras: world point the camera looks down at
+    view_z: float = 0.0
+    view_radius_m: float = 64.0                 # half of the covered square, metres
 
 
 def _zone_from_dict(d: Dict[str, Any]) -> Zone:
@@ -72,7 +75,7 @@ def camera_from_dict(d: Dict[str, Any]) -> CameraConfig:
         raise ValueError(f"camera {d.get('id')!r}: unknown detector {det!r} (expected one of {DETECTORS})")
     cfg = CameraConfig(id=str(d.get("id", "CAM-01")), source=src, detector=det)
     for key in ("name", "uri", "fps", "width", "height", "confidence", "model_path", "device", "imgsz",
-                "timeout_s", "reconnect_s", "enabled"):
+                "timeout_s", "reconnect_s", "enabled", "view_x", "view_z", "view_radius_m"):
         if key in d:
             setattr(cfg, key, type(getattr(cfg, key))(d[key]))
     if "classes" in d:
