@@ -43,6 +43,17 @@ class LightDTO:
     state: str
     phase_index: int
     phase_switches: int
+    sections: dict = field(default_factory=dict)   # movement -> RED/YELLOW/GREEN; empty for a plain straight-only arm
+
+
+@dataclass
+class PedestrianLightDTO:
+    id: str
+    direction: str
+    state: str
+    phase_switches: int = 0
+    waiting_peds: int = 0
+    crossing_peds: int = 0
 
 
 @dataclass
@@ -55,6 +66,7 @@ class MetricsDTO:
     throughput_per_min: float
     congestion_pct: float
     efficiency_pct: float
+    ped_signal_switches: int = 0
 
 
 @dataclass
@@ -71,6 +83,7 @@ class SimulationInfoDTO:
 class IntersectionData:
     simulation: SimulationInfoDTO
     lights: List[LightDTO] = field(default_factory=list)
+    pedestrian_lights: List[PedestrianLightDTO] = field(default_factory=list)
     vehicles: List[VehicleDTO] = field(default_factory=list)
     pedestrians: List[PedestrianDTO] = field(default_factory=list)
     metrics: Optional[MetricsDTO] = None

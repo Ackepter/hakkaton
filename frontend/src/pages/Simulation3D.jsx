@@ -21,6 +21,7 @@ import { ARMS } from '../builder/geometry'
 const WS_URL = `ws://${window.location.hostname}:8001/ws/state`
 const API_URL = `${SI_URL}/simulation/state`
 const LIGHT_COLORS = { RED: '#ef4444', YELLOW: '#fbbf24', GREEN: '#22c55e' }
+const SECTION_GLYPH = { left: '↰', right: '↱', uturn: '↩' }
 const NAV_H = 56
 
 const FALLBACK_LAYOUT = {
@@ -209,6 +210,7 @@ export default function Simulation3D() {
   const vehicles = simState?.vehicles ?? []
   const pedestrians = simState?.pedestrians ?? []
   const lights = simState?.lights ?? []
+  const pedestrianLights = simState?.pedestrian_lights ?? []
   const metrics = simState?.metrics ?? null
   const status = simState?.status ?? 'stopped'
   const simTime = simState?.sim_time ?? 0
@@ -241,6 +243,7 @@ export default function Simulation3D() {
 
       <main style={{ flex: 1, position: 'relative', minWidth: 0, height: '100%' }}>
         <IntersectionScene layout={layout} vehicles={vehicles} pedestrians={pedestrians} lights={lights}
+                           pedestrianLights={pedestrianLights}
                            cameraStatus={cameraStatus} mode={mode} tool={tool} selection={selection}
                            setSelection={setSelection} actions={draft ? d.actions : null} settle={d.settle}
                            rotation={rotation} onSpawn={onSpawn} />
@@ -277,9 +280,27 @@ export default function Simulation3D() {
           <div style={{ marginBottom: 10 }}>
             <div style={{ color: '#64748b', marginBottom: 4 }}>Traffic Lights</div>
             {lights.map(l => (
-              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, gap: 6 }}>
                 <span style={{ textTransform: 'capitalize', color: '#cbd5e1' }}>{l.direction}</span>
-                <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[l.state] ?? '#888' }}>{l.state}</span>
+                <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {Object.entries(l.sections ?? {}).map(([m, s]) => (
+                    <span key={m} title={`${m} arrow`} style={{ fontFamily: 'monospace', fontSize: 10, color: LIGHT_COLORS[s] ?? '#888' }}>
+                      {SECTION_GLYPH[m] ?? m}
+                    </span>
+                  ))}
+                  <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[l.state] ?? '#888' }}>{l.state}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: '#64748b', marginBottom: 4 }}>Pedestrian Lights</div>
+            {pedestrianLights.map(p => (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                <span style={{ textTransform: 'capitalize', color: '#cbd5e1' }}>{p.direction}</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[p.state] ?? '#888' }}>
+                  {p.state === 'GREEN' ? 'WALK' : 'DON’T WALK'}
+                </span>
               </div>
             ))}
           </div>
@@ -292,6 +313,8 @@ export default function Simulation3D() {
               <MRow label="Avg wait" value={`${(metrics.avg_wait_s ?? 0).toFixed(1)}s`} />
               <MRow label="Efficiency" value={`${(metrics.efficiency_pct ?? 0).toFixed(0)}%`} />
               <MRow label="Congestion" value={`${(metrics.congestion_pct ?? 0).toFixed(0)}%`} />
+              <MRow label="Light switches" value={metrics.phase_switches} />
+              <MRow label="Ped signal switches" value={metrics.ped_signal_switches} />
               <div style={{ color: '#64748b', marginBottom: 4, marginTop: 8 }}>Pedestrians</div>
               <MRow label="Waiting" value={metrics.pedestrians_waiting} />
               <MRow label="Crossing" value={metrics.pedestrians_crossing} />

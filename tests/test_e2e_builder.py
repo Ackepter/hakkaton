@@ -509,3 +509,17 @@ def test_a_roads_ip_field_wires_the_light_to_a_real_signal(stack):
     assert north["light_port"] == 9500
     state = si.get("/simulation/state").json()
     assert any(l["id"] == "TL-N" for l in state["lights"])                # the light itself is unaffected either way
+
+
+def test_sections_and_pedestrian_lights_show_up_in_the_live_metrics_panel(stack):
+    b, si = stack
+    fresh(si, "Turn crossroads")
+    si.post("/simulation/config", json={"spawn_rate": 20, "ped_spawn_rate": 15, "time_scale": 3})
+    b.goto("http://127.0.0.1:5173/simulation")
+    assert wait(lambda: b.exists("edit-city"), 30)
+    si.post("/simulation/start")
+    assert wait(lambda: len(si.get("/simulation/state").json()["lights"][0]["sections"]) > 0, 20)
+    time.sleep(2)
+    text = b.js("document.body.innerText")
+    assert "Pedestrian Lights" in text and ("WALK" in text or "DON" in text)
+    assert b.js("!!document.querySelector('canvas')")

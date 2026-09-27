@@ -17,12 +17,12 @@ import time
 import logging
 from typing import Dict, List, Optional
 
-from .models import Vehicle, Pedestrian, SimTrafficLight
+from .models import Vehicle, Pedestrian, PedestrianCrossing, SimTrafficLight
 from .world import build_world, ARM_LENGTH, STOP_LINE_DIST
 from ..hardware.udp_matrix import UdpMatrixLight
 from ..geometry import (blocked_crossings, build_paths, crossing_stages, divergence, needs_zones, path_zones,
                         pedestrian_xz, zone_region)
-from ..layout import Layout, default_layout, roundabout_dims, stages as layout_stages, validate_layout
+from ..layout import Layout, default_layout, lane_moves, roundabout_dims, stages as layout_stages, target_arm, validate_layout
 from .behaviors import update_vehicle, update_pedestrian, MIN_GAP_M
 from .traffic_generator import SpawnManager
 from .metrics import MetricsEngine
@@ -111,10 +111,21 @@ class SimulationEngine:
         self._crossing_stages = crossing_stages(self.layout)
         self._blockers = {cid: [a for a in self.layout.enabled_arms() if cg.direction in blocked_crossings(self.layout, (a,))]
                           for cid, cg in self._crossings.items()}
+        # additional sections this arm's light needs (Task: not every light is a plain 3-lamp head any more) — one per
+        # turning movement any of its lanes actually use; a plain-straight arm (most preset types) gets none at all.
+        self._arm_sections: Dict[str, List[str]] = {}
+        for direction in self.layout.enabled_arms():
+            moves = set()
+            for i in range(self.layout.arms[direction].lanes_in):
+                moves |= set(lane_moves(self.layout, direction, i))
+            moves.discard("straight")
+            if moves:
+                self._arm_sections[direction] = sorted(moves)
         self._phases = self._build_program()
         self._phase_index = 0
         self._phase_elapsed = 0.0
         self._overrides: Dict[str, str] = {}
+        self._ped_overrides: Dict[str, str] = {}
         self.camera_failure = False           # virtual camera unplugged (scenario / API switch)
         self._perception: Optional[dict] = None  # latest camera-derived demand pushed by the main project
         self._perception_at = 0.0
@@ -126,7 +137,10 @@ class SimulationEngine:
         self._newly_crossed = 0
         self._finished_waits: List[float] = []
         self._ped_signals: Dict[str, str] = {}
+        self._ped_occupied: set = set()
         self.sim_time = 0.0
+        self._update_ped_signals()          # so a fresh / just-applied layout already shows correct lights and
+        self._apply_lights()                # sections before the first tick, not only once the loop has run once
 
     # ------------------------------------------------------------------ layout
 
@@ -257,6 +271,17 @@ class SimulationEngine:
             self._lights[light_id].state = state
         return True
 
+    def set_ped_light_state(self, crossing_id: str, state: str) -> bool:
+        """Manual override of one pedestrian signal. state 'AUTO' releases it. Returns False for an unknown crossing."""
+        if crossing_id not in self._crossings:
+            return False
+        if state == "AUTO":
+            self._ped_overrides.pop(crossing_id, None)
+        else:
+            self._ped_overrides[crossing_id] = state
+            self._crossings[crossing_id].state = state
+        return True
+
     def set_perception(self, payload: dict):
         """Camera-derived view of the intersection, produced by the vision pipeline of the main project."""
         self._perception = {
@@ -300,6 +325,7 @@ class SimulationEngine:
 
     def clear_overrides(self):
         self._overrides.clear()
+        self._ped_overrides.clear()
 
     def spawn_vehicle(self, arm: str, vehicle_type: str = "car", lane: Optional[int] = None,
                       movement: Optional[str] = None) -> Optional[Vehicle]:
@@ -349,6 +375,7 @@ class SimulationEngine:
             "vehicles": [_vehicle_to_dict(v) for v in self._vehicles.values()],
             "pedestrians": [_ped_to_dict(p) for p in self._pedestrians.values()],
             "lights": [_light_to_dict(l) for l in self._lights.values()],
+            "pedestrian_lights": [_ped_light_to_dict(c) for c in self._crossings.values()],
             "metrics": self._metrics.get_summary() or MetricsEngine.empty_snapshot(),
             "seed": self.seed,
         }
@@ -378,9 +405,9 @@ class SimulationEngine:
 
         self._apply_timeline()
         self._advance_phase(dt)
+        self._update_ped_signals()          # before _apply_lights: sections read it to decide a turn arrow
         self._apply_lights()
         self._spawn_traffic(dt)
-        self._ped_signals = {cid: self._ped_signal(cid) for cid in self._crossings}
         self._update_vehicles(dt)
         self._update_pedestrians(dt)
 
@@ -389,6 +416,7 @@ class SimulationEngine:
             vehicles=list(self._vehicles.values()),
             pedestrians=list(self._pedestrians.values()),
             lights=list(self._lights.values()),
+            ped_lights=list(self._crossings.values()),
             lanes=self._lanes,
             newly_passed=self._newly_passed,
             newly_crossed=self._newly_crossed,
@@ -552,9 +580,22 @@ class SimulationEngine:
                 light.state = states.get(light.direction, "RED")
             light.phase_index = self._phase_index
             light.phase_duration = duration
+            light.sections = self._light_sections(light.direction, light.state)
             hw = self._light_hw.get(lid)
             if hw is not None:
-                hw.send(light.state)          # mirror the decided state to the real signal; this never feeds back
+                hw.send(light.state)          # mirror the main lamp to the real signal; this never feeds back
+
+    def _light_sections(self, direction: str, main_state: str) -> Dict[str, str]:
+        """One extra arrow lamp per turning movement this arm's lanes use. RED/YELLOW mirrors the main lamp; on GREEN a
+        turn still goes RED on its own while the crosswalk it turns into is walked or about to be (`_ped_occupied` —
+        the exact crossings vehicles already yield to in `_update_vehicles`, so a section never shows a movement as
+        safer than it really is)."""
+        moves = self._arm_sections.get(direction)
+        if not moves:
+            return {}
+        if main_state != "GREEN":
+            return {m: main_state for m in moves}
+        return {m: ("RED" if f"PC-{target_arm(direction, m)[0].upper()}" in self._ped_occupied else "GREEN") for m in moves}
 
     # --- traffic
 
@@ -745,9 +786,9 @@ class SimulationEngine:
                 path = self._paths.get(v.path_id)
                 if path is not None:
                     by_exit.setdefault(path.exit_key, []).append((v, v.position_m - path.box_exit_s))
-        # crosswalks vehicles must give way at: people are on them, or wait for their walk signal (turning traffic yields)
-        occupied = {p.crossing_id for p in self._pedestrians.values()
-                    if p.state == "crossing" or (p.state == "waiting_for_green" and self._ped_signals.get(p.crossing_id) == "GREEN")}
+        # crosswalks vehicles must give way at: people are on them, or about to step out on their own green (turning
+        # traffic yields) — the same set a turn's arrow section already reflects, see `_light_sections`.
+        occupied = self._ped_occupied
         for lane_id, vs in by_lane.items():
             lane = self._lanes.get(lane_id)
             if lane is None:
@@ -806,6 +847,24 @@ class SimulationEngine:
             if v.speed_mps > 0.3 and front >= lo - (v.speed_mps ** 2 / (2 * 0.7 * v.decel) + 3.0) and rear <= hi:
                 return True                                                          # rolling towards it, cannot stop any more
         return False
+
+    def _update_ped_signals(self) -> None:
+        """Decide every pedestrian light, and update the stateful signal object (Task 16: state + switch count)."""
+        self._ped_signals = {}
+        for cid, crossing in self._crossings.items():
+            state = self._ped_overrides.get(cid) or self._ped_signal(cid)
+            self._ped_signals[cid] = state
+            if crossing.state != state:
+                crossing.phase_switches += 1
+            crossing.state = state
+            crossing.waiting_peds = sum(1 for p in self._pedestrians.values()
+                                        if p.crossing_id == cid and p.state == "waiting_for_green")
+            crossing.crossing_peds = sum(1 for p in self._pedestrians.values()
+                                         if p.crossing_id == cid and p.state == "crossing")
+        # crosswalks a vehicle must yield to: someone already on it, or about to step out on their own green
+        self._ped_occupied = {p.crossing_id for p in self._pedestrians.values()
+                              if p.state == "crossing" or (p.state == "waiting_for_green"
+                                                           and self._ped_signals.get(p.crossing_id) == "GREEN")}
 
     def _ped_signal(self, crossing_id: str) -> str:
         if self._overrides or (self._use_zones and self._crossing_busy(crossing_id)):
@@ -892,4 +951,16 @@ def _light_to_dict(l: SimTrafficLight) -> dict:
         "phase_index": l.phase_index,
         "phase_switches": l.phase_switches,
         "lane_ids": l.lane_ids,
+        "sections": dict(l.sections),
+    }
+
+
+def _ped_light_to_dict(c: PedestrianCrossing) -> dict:
+    return {
+        "id": c.id,
+        "direction": c.direction,
+        "state": c.state,
+        "phase_switches": c.phase_switches,
+        "waiting_peds": c.waiting_peds,
+        "crossing_peds": c.crossing_peds,
     }

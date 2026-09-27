@@ -80,7 +80,7 @@ def test_root_sections_and_version():
     _, state = busy_state()
     root = ET.fromstring(body(SimStateExporter.to_xml(state)))
     assert root.tag == "intersectionSimulation" and root.get("version") == "1.0"
-    assert [c.tag for c in root] == ["simulation", "trafficLights", "vehicles", "pedestrians", "metrics"]
+    assert [c.tag for c in root] == ["simulation", "trafficLights", "pedestrianLights", "vehicles", "pedestrians", "metrics"]
 
 
 def test_counts_match_children():

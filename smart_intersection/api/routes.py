@@ -286,6 +286,26 @@ async def set_light_state(light_id: str, cmd: LightCommand):
     return {"light_id": light_id, "state": cmd.state}
 
 
+# ──────────────────── Pedestrian lights ────────────────────
+
+@router.get("/pedestrian-lights")
+async def get_pedestrian_lights():
+    state = _get_engine().get_state()
+    return {"pedestrian_lights": state["pedestrian_lights"]}
+
+
+@router.post("/pedestrian-lights/{crossing_id}/state")
+async def set_pedestrian_light_state(crossing_id: str, cmd: LightCommand):
+    """Manual override of one pedestrian signal (Task 9: MANUAL must be able to force a light; 'AUTO' releases it)."""
+    engine = _get_engine()
+    valid = {"RED", "YELLOW", "GREEN", "AUTO"}
+    if cmd.state not in valid:
+        raise HTTPException(status_code=422, detail=f"state must be one of {sorted(valid)}")
+    if not engine.set_ped_light_state(crossing_id, cmd.state):
+        raise HTTPException(status_code=404, detail=f"Unknown pedestrian crossing {crossing_id!r}")
+    return {"crossing_id": crossing_id, "state": cmd.state}
+
+
 # ──────────────────── Metrics ────────────────────
 
 @router.get("/metrics")

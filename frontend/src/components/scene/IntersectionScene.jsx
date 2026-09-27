@@ -8,16 +8,17 @@ import { OrbitControls } from '@react-three/drei'
 import RoadSystem from './RoadSystem'
 import VehicleModel from './VehicleModel'
 import PedestrianModel from './PedestrianModel'
+import PedestrianLightModel from './PedestrianLightModel'
 import TrafficLightModel from './TrafficLightModel'
 import CameraModel from './CameraModel'
 import { SceneryLayer } from './SceneryModels'
 import BuildLayer from './BuildLayer'
-import { ARMS, defaultCamera, lightPole } from '../../builder/geometry'
+import { ARMS, crossingId, defaultCamera, hasCrossing, lightPole, pedestrianLightPole } from '../../builder/geometry'
 
 const MOUSE_BUILD = { LEFT: -1, MIDDLE: 1, RIGHT: 0 }      // build mode: left click is for tools, right drag orbits
 
 export default function IntersectionScene({
-  layout, vehicles = [], pedestrians = [], lights = [], cameraStatus = () => true, mode = 'play',
+  layout, vehicles = [], pedestrians = [], lights = [], pedestrianLights = [], cameraStatus = () => true, mode = 'play',
   tool = 'select', selection = null, setSelection = () => {}, actions = null, settle = () => {}, rotation = 0,
   onSpawn = () => {},
 }) {
@@ -26,6 +27,9 @@ export default function IntersectionScene({
   const shownLights = (build
     ? ARMS.filter(a => layout.arms[a].enabled).map(a => ({ id: `TL-${a[0].toUpperCase()}`, direction: a, state: 'RED' }))
     : lights).map(l => ({ ...l, pos: lightPole(layout, l.direction) }))
+  const shownPedLights = (build
+    ? ARMS.filter(a => hasCrossing(layout, a)).map(a => ({ id: crossingId(a), direction: a, state: 'RED' }))
+    : pedestrianLights).map(p => ({ ...p, pos: pedestrianLightPole(layout, p.direction) }))
 
   return (
     <Canvas shadows camera={{ position: [0, 90, 90], fov: 45, near: 1, far: 900 }}
@@ -50,6 +54,7 @@ export default function IntersectionScene({
       )}
 
       {shownLights.map(l => <TrafficLightModel key={l.id} {...l} />)}
+      {shownPedLights.map(p => <PedestrianLightModel key={p.id} {...p} />)}
       {!build && vehicles.map(v => <VehicleModel key={v.id} {...v} />)}
       {!build && pedestrians.map(p => <PedestrianModel key={p.id} {...p} />)}
 

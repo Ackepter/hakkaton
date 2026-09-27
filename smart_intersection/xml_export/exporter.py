@@ -34,6 +34,23 @@ class SimStateExporter:
             l_el.set("state", str(light["state"]))
             l_el.set("phase_index", str(light.get("phase_index", 0)))
             l_el.set("phase_switches", str(light.get("phase_switches", 0)))
+            for movement, section_state in sorted((light.get("sections") or {}).items()):
+                s_el = ET.SubElement(l_el, "section")
+                s_el.set("movement", str(movement))
+                s_el.set("state", str(section_state))
+
+        # <pedestrianLights>
+        ped_lights = state.get("pedestrian_lights", [])
+        ped_lights_el = ET.SubElement(root, "pedestrianLights")
+        ped_lights_el.set("count", str(len(ped_lights)))
+        for pl in ped_lights:
+            pl_el = ET.SubElement(ped_lights_el, "pedestrianLight")
+            pl_el.set("id", str(pl["id"]))
+            pl_el.set("direction", str(pl["direction"]))
+            pl_el.set("state", str(pl["state"]))
+            pl_el.set("phase_switches", str(pl.get("phase_switches", 0)))
+            pl_el.set("waiting_peds", str(pl.get("waiting_peds", 0)))
+            pl_el.set("crossing_peds", str(pl.get("crossing_peds", 0)))
 
         # <vehicles>
         vehicles = state.get("vehicles", [])
@@ -84,6 +101,7 @@ class SimStateExporter:
         m_el.set("throughput_per_min", str(round(float(metrics.get("throughput_per_min", 0.0)), 2)))
         m_el.set("congestion_pct", str(round(float(metrics.get("congestion_pct", 0.0)), 1)))
         m_el.set("efficiency_pct", str(round(float(metrics.get("efficiency_pct", 100.0)), 1)))
+        m_el.set("ped_signal_switches", str(int(metrics.get("ped_signal_switches", 0))))
 
         ET.indent(root, space="  ")
         return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")

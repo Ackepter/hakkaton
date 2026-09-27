@@ -6,8 +6,9 @@
   <xs:element name="intersectionSimulation">
     <xs:complexType>
       <xs:sequence>
-        <xs:element name="simulation"    type="SimulationType"/>
-        <xs:element name="trafficLights" type="TrafficLightsType"/>
+        <xs:element name="simulation"       type="SimulationType"/>
+        <xs:element name="trafficLights"    type="TrafficLightsType"/>
+        <xs:element name="pedestrianLights" type="PedestrianLightsType"/>
         <xs:element name="vehicles"      type="VehiclesType"/>
         <xs:element name="pedestrians"   type="PedestriansType"/>
         <xs:element name="metrics"       type="MetricsType"/>
@@ -43,11 +44,37 @@
   </xs:complexType>
 
   <xs:complexType name="LightType">
+    <xs:sequence>
+      <!-- an extra arrow lamp per turning movement this arm's lanes actually use; none for a plain straight-only arm -->
+      <xs:element name="section" type="SectionType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
     <xs:attribute name="id"            type="xs:string"    use="required"/>
     <xs:attribute name="direction"     type="DirectionEnum" use="required"/>
     <xs:attribute name="state"         type="LightStateEnum" use="required"/>
     <xs:attribute name="phase_index"   type="xs:integer"   use="required"/>
     <xs:attribute name="phase_switches" type="xs:integer"  use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="SectionType">
+    <xs:attribute name="movement" type="MovementEnum"    use="required"/>
+    <xs:attribute name="state"    type="LightStateEnum"  use="required"/>
+  </xs:complexType>
+
+  <!-- Pedestrian signals: one controllable, stateful light per crosswalk -->
+  <xs:complexType name="PedestrianLightsType">
+    <xs:sequence>
+      <xs:element name="pedestrianLight" type="PedestrianLightType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="count" type="xs:integer" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="PedestrianLightType">
+    <xs:attribute name="id"              type="xs:string"      use="required"/>
+    <xs:attribute name="direction"       type="DirectionEnum"  use="required"/>
+    <xs:attribute name="state"           type="LightStateEnum" use="required"/>
+    <xs:attribute name="phase_switches"  type="xs:integer"     use="required"/>
+    <xs:attribute name="waiting_peds"    type="xs:integer"     use="required"/>
+    <xs:attribute name="crossing_peds"   type="xs:integer"     use="required"/>
   </xs:complexType>
 
   <xs:simpleType name="DirectionEnum">
@@ -150,6 +177,7 @@
     <xs:attribute name="throughput_per_min" type="xs:decimal" use="required"/>
     <xs:attribute name="congestion_pct"     type="xs:decimal" use="required"/>
     <xs:attribute name="efficiency_pct"     type="xs:decimal" use="required"/>
+    <xs:attribute name="ped_signal_switches" type="xs:integer" use="optional"/>
   </xs:complexType>
 
 </xs:schema>

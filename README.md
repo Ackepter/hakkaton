@@ -168,6 +168,7 @@ pytest smart_intersection/tests -v
 pytest tests/test_frontend_geometry.py tests/test_vision_sync.py tests/test_e2e_builder.py -v
 pytest smart_intersection/tests/test_junctions.py -v     # полосы, повороты, развороты, кольцо, физика на всех типах
 pytest smart_intersection/tests/test_hardware.py -v      # параллельный вывод на физический светофор по IP (UDP)
+pytest smart_intersection/tests/test_signals.py -v       # доп. секции (стрелки) и пешеходные светофоры
 ```
 
 Тесты **не требуют** Raspberry Pi или реального оборудования.
@@ -187,8 +188,10 @@ pytest smart_intersection/tests/test_hardware.py -v      # параллельн�
 **кольцо**. Готовые типы (в вкладке *Cities*): Crossroads, T-junction, Two-way street, Tram avenue, Bus street, Busy
 junction, **Turn crossroads, No-left crossroads, T-junction with turns, Roundabout, Roundabout 2-lane entries,
 Avenue with U-turn (4 полосы, разворот и перестроение в левую полосу), Boulevard, Grand junction** — логика каждого
-описана в [docs/junctions.md](docs/junctions.md), там же — параллельный вывод каждого светофора на физическую
-LED-матрицу по IP (`config/traffic_lights.yaml`, протокол `task_files/traffic_light.py`).
+описана в [docs/junctions.md](docs/junctions.md). Там же: светофор с поворотными стрелками (доп. секциями) там, где
+полосы реально поворачивают, отдельные управляемые пешеходные светофоры на каждом переходе (свой счётчик переключений,
+ждущие/переходящие — не только число машин и людей), и параллельный вывод каждого светофора на физическую LED-матрицу
+по IP (`config/traffic_lights.yaml`, протокол `task_files/traffic_light.py`).
 Подробности и формат JSON: [docs/constructor.md](docs/constructor.md).
 
 ---

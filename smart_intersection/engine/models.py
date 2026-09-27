@@ -73,12 +73,18 @@ class Pedestrian:
 class SimTrafficLight:
     id: str
     direction: str        # north/south/east/west
-    state: str            # RED/YELLOW/GREEN
+    state: str            # RED/YELLOW/GREEN — the main (through) lamp
     phase_index: int
     phase_start_time: float
     phase_duration: float
     phase_switches: int
     lane_ids: list        # which lanes this light controls
+    # additional sections (Task: a real light has more than one uniform state): one extra arrow lamp per turning
+    # movement this arm's lanes actually use (left / right / uturn — "straight" is the main lamp, never a section).
+    # An arm where every lane only goes straight gets none. RED/YELLOW mirror the main lamp; on GREEN a turn arrow
+    # still goes RED on its own while a pedestrian is on (or about to step onto) the crosswalk it turns into —
+    # exactly the crosswalk vehicles already yield to (Task 26: no manual command may create an unsafe combination).
+    sections: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -99,10 +105,14 @@ class Lane:
 class PedestrianCrossing:
     id: str
     direction: str        # which road arm: north/south/east/west
-    traffic_light_id: str # pedestrian signal (GREEN = walk)
+    traffic_light_id: str # the vehicle light this crossing shares an arm with (for reference only — see `state`)
     waiting_peds: int = 0
     crossing_peds: int = 0
     geo: dict = None          # geometry.crossing_geometry(): where the walkway is and how wide
+    # the pedestrian signal itself: a first-class controllable light, same as SimTrafficLight (Task 16: state, switch
+    # count and uptime must be tracked for every signal, this one included; Task 9: MANUAL may force it too).
+    state: str = "RED"        # GREEN = walk
+    phase_switches: int = 0
 
 
 @dataclass
