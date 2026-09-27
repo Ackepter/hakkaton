@@ -79,7 +79,8 @@ def test_simulation_source_renders_frame_and_virtual_detections():
     assert f.image.size == (640, 480) and f.seq == 1 and f.detections
     assert {d.cls for d in f.detections} <= {"car", "truck", "bus", "tram", "emergency", "person"}
     assert src.read().seq == 2
-    assert {z.id for z in src.zones} >= {"north-in", "PC-N"}
+    assert {z.id for z in src.zones} >= {"east-in", "PC-E"}
+    assert not {z.id for z in src.zones} & {"north-in", "south-in", "west-in"}
 
 
 def test_simulation_source_reports_signal_loss_as_none():

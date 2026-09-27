@@ -18,10 +18,15 @@
 
 cameras:
   - id: CAM-01
-    name: Overhead camera (simulation)
+    name: West approach camera (simulation)
     source: simulation
     uri: http://127.0.0.1:8001        # Smart Intersection service (virtual camera output)
     detector: virtual
+    x: -30
+    z: 0
+    height_m: 12
+    fov_deg: 55
+    range_m: 75
     fps: 5
     width: 640
     height: 480                       # 4:3 like a USB camera

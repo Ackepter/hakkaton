@@ -217,7 +217,7 @@ export function cameraFootprint(cam, aspect = 4 / 3) {
   return out
 }
 
-/** The overhead camera used when a layout has none: above the middle of the junction, sees all four approaches. */
+/** Default virtual camera mounted beside one approach and aimed across that approach. */
 export const defaultCamera = (layout) => ({
-  id: 'CAM-01', x: 0, z: 0, height_m: 2.8 * boxHalf(layout), fov_deg: 100, radius_m: 150, yaw_deg: null, pitch_deg: 90, enabled: true,
+  id: 'CAM-01', x: -boxHalf(layout) - 14, z: 0, height_m: 12, fov_deg: 55, radius_m: 75, yaw_deg: null, pitch_deg: null, enabled: true,
 })
