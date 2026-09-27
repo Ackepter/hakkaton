@@ -13,7 +13,7 @@ import TrafficLightModel from './TrafficLightModel'
 import CameraModel from './CameraModel'
 import { SceneryLayer } from './SceneryModels'
 import BuildLayer from './BuildLayer'
-import { ARMS, crossingId, defaultCamera, hasCrossing, lightPole, pedestrianLightPole } from '../../builder/geometry'
+import { ARMS, crossingId, defaultCamera, hasCrossing, lightPole, pedestrianLightPoles } from '../../builder/geometry'
 
 const MOUSE_BUILD = { LEFT: -1, MIDDLE: 1, RIGHT: 0 }      // build mode: left click is for tools, right drag orbits
 
@@ -29,7 +29,9 @@ export default function IntersectionScene({
     : lights).map(l => ({ ...l, pos: lightPole(layout, l.direction) }))
   const shownPedLights = (build
     ? ARMS.filter(a => hasCrossing(layout, a)).map(a => ({ id: crossingId(a), direction: a, state: 'RED' }))
-    : pedestrianLights).map(p => ({ ...p, pos: pedestrianLightPole(layout, p.direction) }))
+    : pedestrianLights).flatMap(p => pedestrianLightPoles(layout, p.direction).map((pole, i) => ({
+      ...p, ...pole, id: `${p.id}-${i}`,
+    })))
 
   return (
     <Canvas shadows camera={{ position: [0, 90, 90], fov: 45, near: 1, far: 900 }}

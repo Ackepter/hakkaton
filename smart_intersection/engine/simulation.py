@@ -323,6 +323,21 @@ class SimulationEngine:
             return "camera data lost"
         return None
 
+    def camera_priority(self) -> dict:
+        """Summarize which road users the healthy camera demand currently favors."""
+        if not self._perception_usable():
+            return {"camera_ok": False, "recipient": None, "vehicles": 0, "pedestrians": 0}
+        p = self._perception
+        vehicles = sum(p["vehicles"].values())
+        pedestrians = sum(p["pedestrians_waiting"].values())
+        if any(p["ped_priority"].values()) or (pedestrians and not vehicles):
+            recipient = "pedestrians"
+        elif vehicles:
+            recipient = "drivers"
+        else:
+            recipient = None
+        return {"camera_ok": True, "recipient": recipient, "vehicles": vehicles, "pedestrians": pedestrians}
+
     def clear_overrides(self):
         self._overrides.clear()
         self._ped_overrides.clear()
@@ -368,6 +383,7 @@ class SimulationEngine:
             "signal_mode": self.layout.signal.mode,
             "failsafe_reason": self.failsafe_reason(),
             "perception": self.perception_status(),
+            "camera_priority": self.camera_priority(),
             "camera_failure": self.camera_failure,
             "phase": {"index": self._phase_index, "elapsed": round(self._phase_elapsed, 2)},
             "junction": self.layout.junction,

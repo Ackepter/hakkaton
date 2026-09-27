@@ -119,13 +119,17 @@ export function lightPole(layout, arm) {
   return [ox * (B + 6) + rx * lat, oz * (B + 6) + rz * lat]
 }
 
-/** Pedestrian signal pole: at the crosswalk itself (same distance as layout.py's crossing_geometry centre), kerb side. */
-export function pedestrianLightPole(layout, arm) {
+/** Pedestrian signal poles at both ends of a crosswalk, facing the people waiting on each kerb. */
+export function pedestrianLightPoles(layout, arm) {
   const B = boxHalf(layout)
   const [ox, oz] = OUT[arm]
-  const [rx, rz] = rightVec(arm)
-  const lat = LANE_W * lanesIn(layout.arms[arm]) + 3
-  return [ox * (B + 2.5) + rx * lat, oz * (B + 2.5) + rz * lat]
+  const [lo, hi] = crossingSpan(layout, arm)
+  const center = B + 2.5
+  const eastWestCrossing = arm === 'north' || arm === 'south'
+  return [
+    { pos: eastWestCrossing ? [lo - 1.5, oz * center] : [ox * center, lo - 1.5], rotation: eastWestCrossing ? Math.PI / 2 : 0 },
+    { pos: eastWestCrossing ? [hi + 1.5, oz * center] : [ox * center, hi + 1.5], rotation: eastWestCrossing ? -Math.PI / 2 : Math.PI },
+  ]
 }
 
 export function roadRects(layout) {

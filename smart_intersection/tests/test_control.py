@@ -311,3 +311,21 @@ def test_pedestrian_priority_also_works_from_the_camera_flag():
         if e._phase_index != last:
             break
     assert e.sim_time - start == pytest.approx(MIN_GREEN, abs=0.3)
+
+
+def test_camera_priority_is_exposed_for_the_live_screen_and_falls_back_without_camera():
+    e = idle()
+    e.set_perception({"camera_ok": True, "vehicles": {"east": 1}, "pedestrians_waiting": {"PC-N": 8},
+                      "ped_priority": {"PC-N": True}})
+    assert e.get_state()["camera_priority"] == {
+        "camera_ok": True, "recipient": "pedestrians", "vehicles": 1, "pedestrians": 8,
+    }
+
+    e.set_perception({"camera_ok": True, "vehicles": {"east": 3}, "pedestrians_waiting": {"PC-N": 2},
+                      "ped_priority": {"PC-N": False}})
+    assert e.get_state()["camera_priority"]["recipient"] == "drivers"
+
+    e.set_perception({"camera_ok": False})
+    assert e.get_state()["camera_priority"] == {
+        "camera_ok": False, "recipient": None, "vehicles": 0, "pedestrians": 0,
+    }

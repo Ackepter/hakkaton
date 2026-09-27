@@ -211,6 +211,7 @@ export default function Simulation3D() {
   const pedestrians = simState?.pedestrians ?? []
   const lights = simState?.lights ?? []
   const pedestrianLights = simState?.pedestrian_lights ?? []
+  const cameraPriority = simState?.camera_priority
   const metrics = simState?.metrics ?? null
   const status = simState?.status ?? 'stopped'
   const simTime = simState?.sim_time ?? 0
@@ -303,6 +304,19 @@ export default function Simulation3D() {
                 </span>
               </div>
             ))}
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: '#64748b', marginBottom: 4 }}>Приоритет камеры</div>
+            <div style={{ color: cameraPriority?.camera_ok ? '#e2e8f0' : '#fbbf24', fontWeight: 600 }}>
+              {!cameraPriority?.camera_ok ? 'Таймерный режим · камера недоступна'
+                : cameraPriority.recipient === 'pedestrians' ? '🚶 Пешеходам'
+                  : cameraPriority.recipient === 'drivers' ? '🚗 Водителям' : 'Очередей нет'}
+            </div>
+            {cameraPriority?.camera_ok && (
+              <div style={{ color: '#94a3b8', marginTop: 2 }}>
+                Пешеходов: {cameraPriority.pedestrians} · машин: {cameraPriority.vehicles}
+              </div>
+            )}
           </div>
           {metrics ? (
             <div>
