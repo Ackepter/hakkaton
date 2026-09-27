@@ -1,9 +1,13 @@
 """
-SimulationEngine — physical simulation of a 4-way signalised intersection.
+SimulationEngine — physical simulation of a signalised intersection or a roundabout.
 
 * deterministic for a given seed (all randomness goes through one random.Random)
 * physics runs in fixed sub-steps (<= MAX_SUBSTEP) so high time_scale never breaks car following
-* signal phases: 0 NS green | 1 NS yellow | 2 all-red | 3 EW green | 4 EW yellow | 5 all-red
+* signals run in stages (layout.stages): three phases each: green | yellow | all-red. The classic crossroads has two
+  stages, north-south and east-west: 0 NS green | 1 NS yellow | 2 all-red | 3 EW green | 4 EW yellow | 5 all-red.
+  Turn lanes with left turns / u-turns get one protected stage per arm.
+* vehicles follow geometry paths (straight, turn, u-turn, roundabout); where paths merge or cross, conflict cells are
+  reserved in priority order (vehicles past their stop line first, then the older one)
 * control_mode "auto": adaptive green (demand, pedestrian and emergency aware); "failsafe": fixed timing
 """
 import asyncio
@@ -15,7 +19,9 @@ from typing import Dict, List, Optional
 
 from .models import Vehicle, Pedestrian, SimTrafficLight
 from .world import build_world, ARM_LENGTH, STOP_LINE_DIST
-from ..layout import Layout, default_layout, validate_layout
+from ..geometry import (blocked_crossings, build_paths, crossing_stages, divergence, needs_zones, path_zones,
+                        pedestrian_xz, zone_region)
+from ..layout import Layout, default_layout, roundabout_dims, stages as layout_stages, validate_layout
 from .behaviors import update_vehicle, update_pedestrian, MIN_GAP_M
 from .traffic_generator import SpawnManager
 from .metrics import MetricsEngine
@@ -39,6 +45,7 @@ PED_QUEUE_SPACING_M = 0.5
 MAX_SUBSTEP = 0.1
 MAX_QUEUE = 20
 PERCEPTION_TIMEOUT_S = 3.0   # sim-seconds (scaled by time_scale) without camera data -> FAILSAFE
+RING_LOAD_LIMIT = 0.5        # share of the roundabout ring that may be taken before entries wait (no gridlock)
 MIN_TIME_SCALE = 0.1
 MAX_TIME_SCALE = 20.0
 
@@ -61,6 +68,9 @@ def _group_of(direction: str) -> str:
     return "ns" if direction in ("north", "south") else "ew"
 
 
+INTERSECTION_HALF_DEFAULT = 16.0
+
+
 class SimulationEngine:
     def __init__(self, seed: int = 42, tick_rate: float = 10.0, layout: Optional[Layout] = None):
         self.layout = layout or default_layout()
@@ -81,6 +91,15 @@ class SimulationEngine:
         self._vehicles: Dict[str, Vehicle] = {}
         self._pedestrians: Dict[str, Pedestrian] = {}
         self._lanes, self._lights, self._crossings = build_world(self.layout)
+        self._paths = build_paths(self.layout)
+        self._roundabout = self.layout.junction == "roundabout"
+        self._use_zones = needs_zones(self._paths, self.layout)
+        self._zones, self._follow = path_zones(self._paths, zone_region(self.layout)) if self._use_zones else ({}, {})
+        self._split: Dict[tuple, int] = {}
+        self._stages = [] if self._roundabout else layout_stages(self.layout)
+        self._crossing_stages = crossing_stages(self.layout)
+        self._blockers = {cid: [a for a in self.layout.enabled_arms() if cg.direction in blocked_crossings(self.layout, (a,))]
+                          for cid, cg in self._crossings.items()}
         self._phases = self._build_program()
         self._phase_index = 0
         self._phase_elapsed = 0.0
@@ -95,6 +114,7 @@ class SimulationEngine:
         self._newly_passed = 0
         self._newly_crossed = 0
         self._finished_waits: List[float] = []
+        self._ped_signals: Dict[str, str] = {}
         self.sim_time = 0.0
 
     # ------------------------------------------------------------------ layout
@@ -104,12 +124,22 @@ class SimulationEngine:
         return self.layout.signal
 
     def _build_program(self) -> List[tuple]:
-        """(ns_state, ew_state, duration). Adaptive keeps the classic 6-phase cycle; fixed runs the user's program."""
+        """
+        [(lamp per arm, duration)]. Adaptive: three phases (green, yellow, all-red) per stage, in stage order.
+        Fixed: the user program, phase by phase. A roundabout has no lamps: one endless dummy phase.
+        """
         sg = self.layout.signal
-        if sg.mode == "fixed" and sg.program:
-            return [(p.ns, p.ew, p.duration) for p in sg.program]
-        return [("GREEN", "RED", sg.base_green), ("YELLOW", "RED", sg.yellow), ("RED", "RED", sg.all_red),
-                ("RED", "GREEN", sg.base_green), ("RED", "YELLOW", sg.yellow), ("RED", "RED", sg.all_red)]
+        arms = self.layout.enabled_arms()
+        if self._roundabout or not arms:
+            return [({}, 60.0)]
+        if self.fixed_program:
+            return [({a: p.lamp(a) for a in arms}, p.duration) for p in sg.program]
+        out = []
+        for stage in self._stages:
+            out.append(({a: "GREEN" if a in stage else "RED" for a in arms}, sg.base_green))
+            out.append(({a: "YELLOW" if a in stage else "RED" for a in arms}, sg.yellow))
+            out.append(({a: "RED" for a in arms}, sg.all_red))
+        return out
 
     @property
     def fixed_program(self) -> bool:
@@ -122,6 +152,8 @@ class SimulationEngine:
         arms = ("north", "south", "east", "west")
         sm.arm_weights = {a: (self.layout.arms[a].weight if self.layout.arms[a].enabled else 0.0) for a in arms}
         sm.arm_types = {a: {"bus": "bus", "tram": "tram"}.get(self.layout.arms[a].lane_type) for a in arms}
+        for path in self._paths.values():
+            sm.arm_paths.setdefault(path.arm, {}).setdefault(path.lane_index, []).append(path)
         return sm
 
     def set_layout(self, layout: Layout) -> None:
@@ -251,11 +283,12 @@ class SimulationEngine:
     def clear_overrides(self):
         self._overrides.clear()
 
-    def spawn_vehicle(self, arm: str, vehicle_type: str = "car") -> Optional[Vehicle]:
-        """Interactive: add one vehicle on `arm` now (refused when the arm is missing or its entry is blocked)."""
+    def spawn_vehicle(self, arm: str, vehicle_type: str = "car", lane: Optional[int] = None,
+                      movement: Optional[str] = None) -> Optional[Vehicle]:
+        """Interactive: add one vehicle on `arm` now (refused when the arm / lane / movement is missing or the entry is blocked)."""
         if f"{arm}-in" not in self._lanes:
             return None
-        v = self._spawn.make_vehicle(arm, vehicle_type, self.sim_time)
+        v = self._spawn.make_vehicle(arm, vehicle_type, self.sim_time, lane, movement)
         return v if v is not None and self._try_place(v) else None
 
     def spawn_pedestrian(self, crossing_id: str) -> Optional[Pedestrian]:
@@ -293,6 +326,8 @@ class SimulationEngine:
             "perception": self.perception_status(),
             "camera_failure": self.camera_failure,
             "phase": {"index": self._phase_index, "elapsed": round(self._phase_elapsed, 2)},
+            "junction": self.layout.junction,
+            "stages": [list(st) for st in self._stages],
             "vehicles": [_vehicle_to_dict(v) for v in self._vehicles.values()],
             "pedestrians": [_ped_to_dict(p) for p in self._pedestrians.values()],
             "lights": [_light_to_dict(l) for l in self._lights.values()],
@@ -327,6 +362,7 @@ class SimulationEngine:
         self._advance_phase(dt)
         self._apply_lights()
         self._spawn_traffic(dt)
+        self._ped_signals = {cid: self._ped_signal(cid) for cid in self._crossings}
         self._update_vehicles(dt)
         self._update_pedestrians(dt)
 
@@ -354,36 +390,49 @@ class SimulationEngine:
     def _advance_phase(self, dt: float):
         self._phase_elapsed += dt
         if self._should_end_phase():
-            self._phase_index = (self._phase_index + 1) % len(self._phases)
+            self._phase_index = self._next_phase(self._phase_index)
             self._phase_elapsed = 0.0
             for light in self._lights.values():
                 light.phase_switches += 1
                 light.phase_index = self._phase_index
                 light.phase_start_time = self.sim_time
 
+    def _next_phase(self, idx: int) -> int:
+        nxt = (idx + 1) % len(self._phases)
+        if not self.fixed_program and len(self._stages) > 2 and nxt % 3 == 0 and not self.failsafe_reason():
+            demand = [self._demand(k) for k in range(len(self._stages))]
+            if any(demand):                                  # protected stages: skip an arm nobody is waiting on
+                k = nxt // 3
+                while not demand[k]:
+                    k = (k + 1) % len(self._stages)
+                nxt = 3 * k
+        return nxt
+
     def _should_end_phase(self) -> bool:
         idx, elapsed, sg = self._phase_index, self._phase_elapsed, self.sig
-        if self.fixed_program:                          # the user's program is executed exactly
-            return elapsed >= self._phases[idx][2]
-        if idx in (1, 4):
+        if self._roundabout:
+            return False
+        if self.fixed_program:                          # the user program is executed exactly
+            return elapsed >= self._phases[idx][1]
+        stage, kind = divmod(idx, 3)
+        if kind == 1:
             return elapsed >= sg.yellow
-        if idx in (2, 5):
-            leaving = "ns" if idx == 2 else "ew"
-            return elapsed >= MAX_ALL_RED_S or (elapsed >= sg.all_red and not self._group_in_conflict_zone(leaving))
+        if kind == 2:
+            # all-red: wait for the stage that just had green to leave the box (phase 2 -> stage 0, phase 5 -> stage 1 ...)
+            return elapsed >= MAX_ALL_RED_S or (elapsed >= sg.all_red and not self._arms_in_conflict_zone(self._stages[stage]))
         if self.failsafe_reason():
             return elapsed >= FAILSAFE_GREEN
-        group = "ns" if idx == 0 else "ew"
         if elapsed >= sg.max_green:
             return True
-        if self._peds_crossing_for(group):
+        if self._peds_crossing_for(stage):
             return False
-        emerg_here, emerg_other = self._emergency_demand(group), self._emergency_demand(OTHER[group])
-        if emerg_here:
+        others = [k for k in range(len(self._stages)) if k != stage]
+        if self._emergency_demand(stage):
             return False
-        if emerg_other and elapsed >= EMERGENCY_MIN_GREEN:
+        if elapsed >= EMERGENCY_MIN_GREEN and any(self._emergency_demand(k) for k in others):
             return True
-        cur, other = self._demand(group), self._demand(OTHER[group])
-        if elapsed >= sg.min_green and self._ped_priority(OTHER[group]):
+        cur, other = self._demand(stage), sum(self._demand(k) for k in others)
+        if elapsed >= sg.min_green and any(self._ped_priority(k) for k in others):
             return True                                   # many pedestrians: give their phase priority
         if elapsed >= sg.min_green and cur == 0 and other > 0:
             return True
@@ -391,77 +440,90 @@ class SimulationEngine:
             return True
         return False
 
-    def _group_in_conflict_zone(self, group: str) -> bool:
-        """True while a vehicle of `group` still occupies the box or the far crosswalk."""
-        far_edge = ARM_LENGTH + STOP_LINE_DIST
+    def _arms_of(self, group) -> tuple:
+        if group == "ns":
+            return ("north", "south")
+        if group == "ew":
+            return ("east", "west")
+        return tuple(group)
+
+    def _group_in_conflict_zone(self, group) -> bool:
+        """True while a vehicle of the group ('ns' / 'ew' or a tuple of arms) still occupies the box or the far crosswalk."""
+        return self._arms_in_conflict_zone(self._arms_of(group))
+
+    def _arms_in_conflict_zone(self, arms) -> bool:
         for v in self._vehicles.values():
-            if _group_of(v.direction) != group:
+            if v.direction not in arms:
                 continue
             crossed = self._dist_to_stop(v) < 0
-            if crossed and v.position_m - v.length_m / 2 < far_edge:
+            if crossed and v.position_m - v.length_m / 2 < self._far_edge(v):
                 return True
         return False
+
+    def _far_edge(self, v: Vehicle) -> float:
+        """Path coordinate where the vehicle has left the box and the crosswalk behind it."""
+        path = self._paths.get(v.path_id)
+        return (path.box_exit_s if path else ARM_LENGTH + INTERSECTION_HALF_DEFAULT) + 5.0
 
     def _dist_to_stop(self, v: Vehicle) -> float:
         lane = self._lanes[v.lane_id]
         return lane.stop_line_m - (v.position_m + v.length_m / 2)
 
-    def _demand(self, group: str) -> int:
-        """Vehicles queued/approaching on the group's arms plus pedestrians that need its green."""
+    def _serves(self, stage: int, cid: str) -> bool:
+        return stage in self._crossing_stages.get(cid, ())
+
+    def _demand(self, stage: int) -> int:
+        """Vehicles queued/approaching on the stage arms plus pedestrians that need its green."""
+        arms = self._stages[stage]
         if self._perception_usable():
             p = self._perception
-            return (sum(p["vehicles"].get(d, 0) for d in GROUP_DIRS[group]) +
-                    sum(n for cid, n in p["pedestrians_waiting"].items()
-                        if cid in self._crossings and self._crossing_needs(cid) == group))
+            return (sum(p["vehicles"].get(d, 0) for d in arms) +
+                    sum(n for cid, n in p["pedestrians_waiting"].items() if cid in self._crossings and self._serves(stage, cid)))
         n = 0
         for v in self._vehicles.values():
-            if _group_of(v.direction) != group:
+            if v.direction not in arms:
                 continue
             d = self._dist_to_stop(v)
             if v.state == "waiting" or -0.5 < d < DEMAND_LOOKAHEAD_M:
                 n += 1
         for p in self._pedestrians.values():
-            if p.state == "waiting_for_green" and self._crossing_needs(p.crossing_id) == group:
+            if p.state == "waiting_for_green" and self._serves(stage, p.crossing_id):
                 n += 1
         return n
 
-    def _ped_priority(self, group: str) -> bool:
-        """A crowd waits on a crosswalk that only this group's green can serve."""
+    def _ped_priority(self, stage: int) -> bool:
+        """A crowd waits on a crosswalk that this stage green can serve."""
         if self._perception_usable():
             return any(flag for cid, flag in self._perception["ped_priority"].items()
-                       if cid in self._crossings and self._crossing_needs(cid) == group)
+                       if cid in self._crossings and self._serves(stage, cid))
         waiting: Dict[str, int] = {}
         for p in self._pedestrians.values():
             if p.state == "waiting_for_green":
                 waiting[p.crossing_id] = waiting.get(p.crossing_id, 0) + 1
-        return any(n >= PED_PRIORITY_THRESHOLD for cid, n in waiting.items() if self._crossing_needs(cid) == group)
+        return any(n >= PED_PRIORITY_THRESHOLD for cid, n in waiting.items() if self._serves(stage, cid))
 
-    def _emergency_demand(self, group: str) -> bool:
+    def _emergency_demand(self, stage: int) -> bool:
+        arms = self._stages[stage]
         if self._perception_usable():
-            return any(self._perception["emergency"].get(d) for d in GROUP_DIRS[group])
+            return any(self._perception["emergency"].get(d) for d in arms)
         for v in self._vehicles.values():
-            if v.vehicle_type == "emergency" and _group_of(v.direction) == group:
+            if v.vehicle_type == "emergency" and v.direction in arms:
                 if -0.5 < self._dist_to_stop(v) < EMERGENCY_LOOKAHEAD_M:
                     return True
         return False
 
-    def _crossing_needs(self, crossing_id: str) -> str:
-        """A crosswalk on an arm can be used while the OTHER group has green."""
-        return OTHER[_group_of(self._crossings[crossing_id].direction)]
-
-    def _peds_crossing_for(self, group: str) -> bool:
-        return any(p.state == "crossing" and self._crossing_needs(p.crossing_id) == group
-                   for p in self._pedestrians.values())
+    def _peds_crossing_for(self, stage: int) -> bool:
+        return any(p.state == "crossing" and self._serves(stage, p.crossing_id) for p in self._pedestrians.values())
 
     def _apply_lights(self):
-        ns_state, ew_state, _ = self._phases[self._phase_index]
+        states, duration = self._phases[self._phase_index]
         for lid, light in self._lights.items():
             if lid in self._overrides:
                 light.state = self._overrides[lid]
             else:
-                light.state = ns_state if _group_of(light.direction) == "ns" else ew_state
+                light.state = states.get(light.direction, "RED")
             light.phase_index = self._phase_index
-            light.phase_duration = self._phases[self._phase_index][2]
+            light.phase_duration = duration
 
     # --- traffic
 
@@ -473,7 +535,7 @@ class SimulationEngine:
             self._pedestrians[p.id] = p
 
     def _assign_ped_slot(self, p: Pedestrian):
-        """Pick the emptiest lateral lane on the pedestrian's side and queue behind whoever is already there."""
+        """Pick the emptiest lateral lane on the pedestrian side and queue behind whoever is already there."""
         queued = [q for q in self._pedestrians.values()
                   if q.crossing_id == p.crossing_id and q.direction == p.direction
                   and q.state in ("walking_to_crossing", "waiting_for_green")]
@@ -481,6 +543,17 @@ class SimulationEngine:
         p.offset = offset
         p.stand_position = -PED_QUEUE_SPACING_M * sum(1 for q in queued if q.offset == offset)
         p.position_m = p.stand_position - 2.5
+        p.crossing_width = self._crossings[p.crossing_id].geo["width"]
+        self._sync_ped_xy(p)
+
+    def _sync_ped_xy(self, p: Pedestrian) -> None:
+        cg = self._crossings[p.crossing_id].geo
+        p.x, p.z = pedestrian_xz(cg, p.position_m, p.direction, p.offset)
+
+    def _sync_xy(self, v: Vehicle) -> None:
+        path = self._paths.get(v.path_id)
+        if path is not None:
+            v.x, v.z, v.heading = path.pose(v.position_m, v.length_m)
 
     def _try_place(self, v: Vehicle) -> bool:
         """Insert a new vehicle only if the entry point is free; adapt its speed to the leader."""
@@ -504,6 +577,7 @@ class SimulationEngine:
             if gap < MIN_GAP_M + 2.0:
                 return False
             v.speed_mps = min(v.speed_mps, 0.9 * math.sqrt(2 * 0.7 * v.decel * (gap - MIN_GAP_M)))
+        self._sync_xy(v)
         self._vehicles[v.id] = v
         return True
 
@@ -511,11 +585,137 @@ class SimulationEngine:
         cid = f"PC-{direction[0].upper()}"
         return any(p.crossing_id == cid and p.state == "crossing" for p in self._pedestrians.values())
 
+    # --- conflict zones: who may enter which part of the box
+
+    def _commit_s(self, v: Vehicle, path) -> float:
+        """Path coordinate the front must pass before the vehicle counts as committed (holds priority)."""
+        return path.box_entry_s if self._roundabout else self._lanes[v.lane_id].stop_line_m
+
+    def _zone_walls(self, vehicles: List[Vehicle]) -> Dict[str, float]:
+        """
+        Where a vehicle must stop because another one is in, or is about to enter, a zone the two routes share.
+
+        A vehicle that is already inside its zone, or is too close to stop before it, is never asked to give way. Otherwise
+        it gives way to a vehicle inside its own zone, and to one that is within its braking distance + 4 m of the zone when
+        it has priority (past the stop line / on the ring first, then the older vehicle). Result: distance from the front
+        bumper to the zone entrance ('wall').
+        """
+        by_path: Dict[str, List[Vehicle]] = {}
+        info = {}
+        for v in vehicles:
+            path = self._paths.get(v.path_id)
+            if path is None:
+                continue
+            front = v.position_m + v.length_m / 2
+            info[v.id] = (front, v.speed_mps ** 2 / (2 * 0.7 * v.decel), (0 if front > self._commit_s(v, path) else 1, v.seq))
+            by_path.setdefault(v.path_id, []).append(v)
+        walls: Dict[str, float] = {}
+        for v in vehicles:
+            foes = self._zones.get(v.path_id)
+            if not foes:
+                continue
+            front, brake, prio = info[v.id]
+            rear = front - v.length_m
+            wall = None
+            for other, a0, a1, b0, b1 in foes:
+                if rear >= a1 + 0.5 or front > a0 - 0.5 or a0 - front < brake + 0.5:
+                    continue                                       # cleared, inside, or unable to stop: not my turn to wait
+                for w in by_path.get(other, ()):
+                    wfront, wbrake, wprio = info[w.id]
+                    if wfront - w.length_m >= b1 + 0.5:
+                        continue                                   # that vehicle has cleared the zone
+                    inside = wfront > b0 - 0.5 or b0 - wfront < wbrake + 0.5
+                    if inside or (b0 - wfront < wbrake + 4.0 and wprio < prio):
+                        gap = max(0.0, a0 - front)
+                        wall = gap if wall is None else min(wall, gap)
+            if wall is not None:
+                walls[v.id] = wall
+        if self._roundabout:                                       # a full ring would lock up: entries wait outside
+            limit = RING_LOAD_LIMIT * self._ring_length()
+            load = self._ring_load(vehicles)
+            entering = []
+            for v in vehicles:
+                path = self._paths.get(v.path_id)
+                front = v.position_m + v.length_m / 2
+                if path is not None and path.box_entry_s - 10.0 < front < path.box_entry_s - 0.5:
+                    entering.append((v.seq, v, path, front))
+            for _, v, path, front in sorted(entering, key=lambda t: t[0]):
+                if load + v.length_m + 3.0 <= limit:
+                    load += v.length_m + 3.0                        # admitted: it will take its share of the ring
+                else:
+                    walls[v.id] = min(walls.get(v.id, 1e9), max(0.0, path.box_entry_s - 1.5 - front))
+        return walls
+
+    def _ring_length(self) -> float:
+        return 2 * math.pi * roundabout_dims(self.layout)["ring_center"]
+
+    def _ring_load(self, vehicles: List[Vehicle]) -> float:
+        """Metres of the ring taken by vehicles that are on it (length plus a safety gap each)."""
+        load = 0.0
+        for v in vehicles:
+            path = self._paths.get(v.path_id)
+            if path is not None and v.position_m + v.length_m / 2 > path.box_entry_s and v.position_m - v.length_m / 2 < path.box_exit_s:
+                load += v.length_m + 3.0
+        return load
+
+    def _divergence(self, a: str, b: str) -> int:
+        """Where two routes of one lane part; until then their vehicles follow each other in a single file."""
+        key = (a, b) if a < b else (b, a)
+        if key not in self._split:
+            pa, pb = self._paths.get(a), self._paths.get(b)
+            self._split[key] = divergence(pa, pb) if pa is not None and pb is not None else 0
+        return self._split[key]
+
+    def _stretch_gap(self, v: Vehicle, by_path: Dict[str, List[Vehicle]]) -> Optional[float]:
+        """Gap to a vehicle ahead on a stretch the two routes share (merging traffic, the ring of a roundabout)."""
+        front = v.position_m + v.length_m / 2
+        best = None
+        for other, a0, a1, b0, b1, off in self._follow.get(v.path_id, ()):
+            if front <= a0:
+                continue                                           # not on the shared stretch yet
+            for w in by_path.get(other, ()):
+                ws = w.position_m - off                            # w on my axis
+                if w is v or ws <= v.position_m or ws - w.length_m / 2 > a1 + 1.0 or w.position_m + w.length_m / 2 <= b0:
+                    continue
+                gap = (ws - w.length_m / 2) - front
+                if best is None or gap < best:
+                    best = gap
+        return best
+
+    def _exit_gap(self, v: Vehicle, path, by_exit: Dict[str, list]) -> Optional[float]:
+        """Gap to a vehicle of another route ahead of us on the same exit lane (traffic that merged keeps its distance)."""
+        half = v.length_m / 2
+        ev = v.position_m - path.box_exit_s
+        if ev + half < 6.0:
+            return None                                            # still in the box: the merge zones decide there
+        best = None
+        for x, ex in by_exit.get(path.exit_key, ()):
+            if x is v or x.lane_id == v.lane_id or ex <= ev:
+                continue
+            gap = (ex - x.length_m / 2) - (ev + half)
+            if best is None or gap < best:
+                best = gap
+        return best
+
     def _update_vehicles(self, dt: float):
         finished = []
         by_lane: Dict[str, List[Vehicle]] = {}
         for v in self._vehicles.values():
             by_lane.setdefault(v.lane_id, []).append(v)
+        walls: Dict[str, float] = {}
+        by_exit: Dict[str, list] = {}
+        by_path: Dict[str, List[Vehicle]] = {}
+        if self._use_zones:
+            walls = self._zone_walls(list(self._vehicles.values()))
+            for v in self._vehicles.values():
+                by_path.setdefault(v.path_id, []).append(v)
+            for v in self._vehicles.values():
+                path = self._paths.get(v.path_id)
+                if path is not None:
+                    by_exit.setdefault(path.exit_key, []).append((v, v.position_m - path.box_exit_s))
+        # crosswalks vehicles must give way at: people are on them, or wait for their walk signal (turning traffic yields)
+        occupied = {p.crossing_id for p in self._pedestrians.values()
+                    if p.state == "crossing" or (p.state == "waiting_for_green" and self._ped_signals.get(p.crossing_id) == "GREEN")}
         for lane_id, vs in by_lane.items():
             lane = self._lanes.get(lane_id)
             if lane is None:
@@ -525,55 +725,94 @@ class SimulationEngine:
             light_state = light.state if light else "GREEN"
             if light_state == "GREEN" and self._crossing_occupied(lane.direction):
                 light_state = "RED"
-            # leaders first, so each follower sees the leader's already-updated position
+            # leaders first, so each follower sees the leader already-updated position
             vs.sort(key=lambda x: -x.position_m)
             done = []
             for v in vs:
-                if update_vehicle(v, dt, lane, light_state, done) == "finished":
+                path = self._paths.get(v.path_id)
+                ahead, extra = done, None
+                if self._use_zones and path is not None:
+                    vfront = v.position_m + v.length_m / 2
+                    ahead = [x for x in done if x.path_id == v.path_id or vfront < self._divergence(v.path_id, x.path_id)]
+                    extra = walls.get(v.id)
+                    for eg in (self._exit_gap(v, path, by_exit), self._stretch_gap(v, by_path)):
+                        if eg is not None and (extra is None or eg < extra):
+                            extra = eg
+                if occupied and path is not None and f"PC-{path.exit_arm[0].upper()}" in occupied and not path.dead_end:
+                    stop_at = path.box_exit_s + 0.5                   # yield to people on the crosswalk we turn into
+                    front = v.position_m + v.length_m / 2
+                    if front < stop_at:
+                        cw = stop_at - front
+                        extra = cw if extra is None else min(extra, cw)
+                if update_vehicle(v, dt, lane, light_state, ahead, path=path, extra_gap=extra,
+                                  yield_rule=self._use_zones) == "finished":
                     finished.append(v.id)
                     self._newly_passed += 1
                     self._finished_waits.append(v.wait_time)
                 else:
+                    self._sync_xy(v)
                     done.append(v)
         for vid in finished:
             self._vehicles.pop(vid, None)
 
+    def _crossing_busy(self, crossing_id: str) -> bool:
+        """A vehicle is on the crosswalk, or too close to it to stop: nobody may step out yet."""
+        arm = self._crossings[crossing_id].direction
+        for v in self._vehicles.values():
+            path = self._paths.get(v.path_id)
+            if path is None:
+                continue
+            if path.exit_arm == arm and not path.dead_end:
+                lo, hi = path.box_exit_s + 1.0, path.box_exit_s + 4.0             # the band on the exit road
+            elif v.direction == arm:
+                lo, hi = path.box_entry_s - 4.0, path.box_entry_s - 1.0           # the band on the inbound road
+            else:
+                continue
+            front, rear = v.position_m + v.length_m / 2, v.position_m - v.length_m / 2
+            if lo < front and rear <= hi:
+                return True                                                          # on the crosswalk
+            if v.speed_mps > 0.3 and front >= lo - (v.speed_mps ** 2 / (2 * 0.7 * v.decel) + 3.0) and rear <= hi:
+                return True                                                          # rolling towards it, cannot stop any more
+        return False
+
     def _ped_signal(self, crossing_id: str) -> str:
-        if self._overrides:
+        if self._overrides or (self._use_zones and self._crossing_busy(crossing_id)):
             return "RED"
-        crossing_time = 12.0 / 1.4 + PED_MARGIN_S
+        crossing_time = self._crossings[crossing_id].geo["width"] / 1.4 + PED_MARGIN_S
         if self.fixed_program:
             return "GREEN" if self._fixed_window_ok(crossing_id, crossing_time) else "RED"
-        need = self._crossing_needs(crossing_id)
-        if self._phase_index != GREEN_PHASE[need]:
+        stage, kind = divmod(self._phase_index, 3)
+        if kind != 0 or not self._serves(stage, crossing_id):
             return "RED"
         limit = FAILSAFE_GREEN if self.failsafe_reason() else self.sig.max_green
         return "GREEN" if self._phase_elapsed + crossing_time <= limit else "RED"
 
     def _fixed_window_ok(self, crossing_id: str, needed: float) -> bool:
-        """User program: walk only while this arm's traffic is red for long enough and has cleared the crosswalk."""
-        group = _group_of(self._crossings[crossing_id].direction)
-        pick = (lambda ph: ph[0]) if group == "ns" else (lambda ph: ph[1])
+        """User program: walk only while the arms that drive over this crosswalk are red for long enough and have cleared it."""
+        blockers = self._blockers[crossing_id]
+        closed = lambda ph: any(ph[0].get(a, "RED") != "RED" for a in blockers)
         n, idx = len(self._phases), self._phase_index
-        if pick(self._phases[idx]) != "RED" or self._group_in_conflict_zone(group):
+        if closed(self._phases[idx]) or self._arms_in_conflict_zone(blockers):
             return False
-        window = self._phases[idx][2] - self._phase_elapsed
+        window = self._phases[idx][1] - self._phase_elapsed
         for k in range(1, n):
             ph = self._phases[(idx + k) % n]
-            if pick(ph) != "RED":
+            if closed(ph):
                 break
-            window += ph[2]
+            window += ph[1]
         else:
-            return True                                    # this group is never given green
+            return True                                    # these arms are never given green
         return window >= needed
 
     def _update_pedestrians(self, dt: float):
         finished = []
-        signals = {cid: self._ped_signal(cid) for cid in self._crossings}
+        signals = self._ped_signals
         for pid, ped in self._pedestrians.items():
             if update_pedestrian(ped, dt, signals.get(ped.crossing_id, "RED")) == "finished":
                 finished.append(pid)
                 self._newly_crossed += 1
+            else:
+                self._sync_ped_xy(ped)
         for pid in finished:
             self._pedestrians.pop(pid, None)
 
@@ -591,6 +830,11 @@ def _vehicle_to_dict(v: Vehicle) -> dict:
         "state": v.state,
         "wait_time": round(v.wait_time, 2),
         "passed_intersection": v.passed_intersection,
+        "movement": v.movement,
+        "lane_index": v.lane_index,
+        "x": round(v.x, 2),
+        "z": round(v.z, 2),
+        "heading": round(v.heading, 3),
     }
 
 
@@ -603,6 +847,8 @@ def _ped_to_dict(p: Pedestrian) -> dict:
         "wait_time": round(p.wait_time, 2),
         "direction": p.direction,
         "offset": p.offset,
+        "x": round(p.x, 2),
+        "z": round(p.z, 2),
     }
 
 

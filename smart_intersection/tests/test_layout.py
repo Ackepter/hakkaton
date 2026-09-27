@@ -10,6 +10,7 @@ from smart_intersection.layout import (
     Arm, CameraObject, Layout, LayoutStore, SceneObject, Signal, SignalPhase, default_layout, default_scenery,
     hits_road, presets, standard_program, validate_layout,
 )
+from .geo_helpers import run_checks
 from .helpers import check_invariants
 
 ZERO = dict(overlap=0, box_conflict=0, red_run=0, ped_hit=0, ped_stack=0, bad_state=0,
@@ -259,7 +260,10 @@ def test_every_preset_is_physically_valid(name, seed):
     l.traffic.spawn_rate = max(l.traffic.spawn_rate, 30.0)
     l.traffic.ped_spawn_rate = max(l.traffic.ped_spawn_rate, 15.0)
     e = SimulationEngine(seed=seed, layout=l)
-    assert check_invariants(e, seconds=240) == ZERO
+    if e._use_zones:                    # turns / u-turns / roundabouts: vehicles leave the straight lane grid
+        assert run_checks(e, 240) == dict.fromkeys(("overlap", "red_run", "stuck", "off_path", "ped_hit", "backwards"), 0)
+    else:
+        assert check_invariants(e, seconds=240) == ZERO
 
 
 def test_layout_with_shortened_and_dead_end_arms_stays_valid():

@@ -66,6 +66,11 @@ function parseVehicles(root) {
       speed_mps: parseFloat(el.getAttribute('speed_mps') || '0'),
       state: el.getAttribute('state'),
       wait_time: parseFloat(el.getAttribute('wait_time') || '0'),
+      movement: el.getAttribute('movement') || 'straight',
+      lane_index: parseInt(el.getAttribute('lane_index') || '0', 10),
+      x: el.hasAttribute('x') ? parseFloat(el.getAttribute('x')) : null,
+      z: el.hasAttribute('z') ? parseFloat(el.getAttribute('z')) : null,
+      heading: parseFloat(el.getAttribute('heading') || '0'),
     })
   })
   return vehicles
@@ -82,6 +87,8 @@ function parsePedestrians(root) {
       wait_time: parseFloat(el.getAttribute('wait_time') || '0'),
       direction: parseInt(el.getAttribute('direction') || '1', 10),
       offset: parseFloat(el.getAttribute('offset') || '0'),
+      x: el.hasAttribute('x') ? parseFloat(el.getAttribute('x')) : null,
+      z: el.hasAttribute('z') ? parseFloat(el.getAttribute('z')) : null,
     })
   })
   return peds

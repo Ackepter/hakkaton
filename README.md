@@ -166,6 +166,7 @@ pytest smart_intersection/tests -v
 
 # Конструктор (последний тест управляет настоящим Chrome; нужны свободные порты 8000/8001/5173)
 pytest tests/test_frontend_geometry.py tests/test_vision_sync.py tests/test_e2e_builder.py -v
+pytest smart_intersection/tests/test_junctions.py -v     # полосы, повороты, развороты, кольцо, физика на всех типах
 ```
 
 Тесты **не требуют** Raspberry Pi или реального оборудования.
@@ -179,11 +180,23 @@ pytest tests/test_frontend_geometry.py tests/test_vision_sync.py tests/test_e2e_
 автобусные полосы и трамвайные пути, добавлять пешеходные переходы, задавать поток машин и людей, а логику светофора
 собирать из блоков (фаза, лампы, длительность) или оставить адаптивной. Города сохраняются и загружаются, есть готовые
 раскладки. Во время симуляции транспорт и пешеходов можно добавлять кликом рядом с дорогой.
+
+У каждой дороги от 1 до 4 полос в каждую сторону; центр перекрёстка растёт вместе с самой широкой дорогой. Каждая
+полоса имеет стрелки движения (налево, прямо, направо, разворот), поэтому есть перекрёстки с поворотами, разворотами и
+**кольцо**. Готовые типы (в вкладке *Cities*): Crossroads, T-junction, Two-way street, Tram avenue, Bus street, Busy
+junction, **Turn crossroads, No-left crossroads, T-junction with turns, Roundabout, Roundabout 2-lane entries,
+Avenue with U-turn (4 полосы, разворот и перестроение в левую полосу), Boulevard, Grand junction** — логика каждого
+описана в [docs/junctions.md](docs/junctions.md).
 Подробности и формат JSON: [docs/constructor.md](docs/constructor.md).
 
 ---
 
 ## Камеры и компьютерное зрение
+
+Виртуальная камера — настоящая камера-«обскура»: позиция мачты, высота, азимут, наклон и угол обзора (FOV) задаются в
+конструкторе (или в `cameras.yaml`). Она даёт перспективную картинку по геометрии дороги, детектирует только то, что в
+кадре и в пределах дальности, а зоны полос и переходов проецирует в свой кадр — та же модель подходит настоящей камере на
+макете (см. [docs/cameras-and-vision.md](docs/cameras-and-vision.md)).
 
 Камера подключается через `config/cameras.yaml`: `simulation` (виртуальная камера над Smart Intersection),
 `usb`, `file` (видеофайл вместо камеры в WSL), `network`. Детекция — `virtual` (данные симуляции) или локальный

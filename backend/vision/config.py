@@ -55,9 +55,30 @@ class CameraConfig:
     reconnect_s: float = 3.0
     zones: List[Zone] = field(default_factory=list)
     enabled: bool = True
-    view_x: float = 0.0                         # simulation cameras: world point the camera looks down at
-    view_z: float = 0.0
-    view_radius_m: float = 64.0                 # half of the covered square, metres
+    # mount of the camera (pinhole model, see camera_model): position on the ground plan, height, heading and tilt.
+    # x None = the default overhead camera above the middle of the junction (sees all four approaches);
+    # yaw / pitch None = aim at the middle of the junction; height / fov / range None = sensible defaults.
+    x: Optional[float] = None
+    z: Optional[float] = None
+    height_m: Optional[float] = None
+    yaw_deg: Optional[float] = None
+    pitch_deg: Optional[float] = None
+    fov_deg: Optional[float] = None             # horizontal field of view
+    range_m: Optional[float] = None             # objects farther than this are not detected
+
+    @property
+    def calibrated(self) -> bool:
+        """The mount is known, so road zones can be projected into the image (always true for simulation cameras)."""
+        return self.source == "simulation" or self.x is not None
+
+    def pose(self, box_half: float = 16.0):
+        from .camera_model import CameraPose
+        overhead = self.x is None
+        return CameraPose(x=self.x if self.x is not None else 0.0, z=self.z if self.z is not None else 0.0,
+                          height_m=self.height_m or (2.8 * box_half if overhead else 12.0),
+                          yaw_deg=self.yaw_deg, pitch_deg=self.pitch_deg,
+                          fov_deg=self.fov_deg or (100.0 if overhead else 70.0),
+                          range_m=self.range_m or (150.0 if overhead else 90.0))
 
 
 def _zone_from_dict(d: Dict[str, Any]) -> Zone:
@@ -75,9 +96,14 @@ def camera_from_dict(d: Dict[str, Any]) -> CameraConfig:
         raise ValueError(f"camera {d.get('id')!r}: unknown detector {det!r} (expected one of {DETECTORS})")
     cfg = CameraConfig(id=str(d.get("id", "CAM-01")), source=src, detector=det)
     for key in ("name", "uri", "fps", "width", "height", "confidence", "model_path", "device", "imgsz",
-                "timeout_s", "reconnect_s", "enabled", "view_x", "view_z", "view_radius_m"):
+                "timeout_s", "reconnect_s", "enabled"):
         if key in d:
             setattr(cfg, key, type(getattr(cfg, key))(d[key]))
+    for key in ("x", "z", "yaw_deg", "pitch_deg", "height_m", "fov_deg", "range_m"):    # null / missing = automatic
+        if d.get(key) is not None:
+            setattr(cfg, key, float(d[key]))
+    if cfg.fov_deg is not None and not 20.0 <= cfg.fov_deg <= 120.0:
+        raise ValueError(f"camera {cfg.id!r}: fov_deg must be within 20..120")
     if "classes" in d:
         cfg.classes = list(d["classes"])
     if "class_map" in d:
@@ -97,7 +123,7 @@ def default_cameras(settings) -> List[CameraConfig]:
     mode = getattr(settings, "camera_mode", "simulation")
     cfg = CameraConfig(fps=float(getattr(settings, "camera_fps", 5)),
                        width=int(getattr(settings, "camera_width", 640)),
-                       height=int(getattr(settings, "camera_height", 640)),
+                       height=int(getattr(settings, "camera_height", 480)),
                        confidence=float(getattr(settings, "yolo_confidence", 0.5)),
                        model_path=getattr(settings, "yolo_model_path", "models/yolov8n.pt"),
                        device=getattr(settings, "yolo_device", "cpu"))

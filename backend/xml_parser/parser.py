@@ -118,6 +118,11 @@ class XmlParser:
                     speed_mps=float(el.get("speed_mps", 0)),
                     state=el.get("state", "driving"),
                     wait_time=float(el.get("wait_time", 0)),
+                    movement=el.get("movement", "straight"),
+                    lane_index=int(el.get("lane_index", 0)),
+                    x=float(el.get("x")) if el.get("x") is not None else None,
+                    z=float(el.get("z")) if el.get("z") is not None else None,
+                    heading=float(el.get("heading", 0.0)),
                 ))
 
         # <pedestrians>
@@ -133,6 +138,8 @@ class XmlParser:
                     wait_time=float(el.get("wait_time", 0)),
                     direction=int(el.get("direction", 1)),
                     offset=float(el.get("offset", 0.0)),
+                    x=float(el.get("x")) if el.get("x") is not None else None,
+                    z=float(el.get("z")) if el.get("z") is not None else None,
                 ))
 
         # <metrics>

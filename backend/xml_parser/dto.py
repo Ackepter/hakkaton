@@ -16,6 +16,11 @@ class VehicleDTO:
     speed_mps: float
     state: str
     wait_time: float
+    movement: str = "straight"        # left / straight / right / uturn
+    lane_index: int = 0               # inbound lane, 0 = innermost
+    x: Optional[float] = None         # world position of the centre (metres); None in XML of older services
+    z: Optional[float] = None
+    heading: float = 0.0              # atan2(dz, dx)
 
 
 @dataclass
@@ -27,6 +32,8 @@ class PedestrianDTO:
     wait_time: float
     direction: int = 1
     offset: float = 0.0
+    x: Optional[float] = None
+    z: Optional[float] = None
 
 
 @dataclass

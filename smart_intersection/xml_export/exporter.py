@@ -49,6 +49,12 @@ class SimStateExporter:
             v_el.set("speed_mps", str(round(float(v.get("speed_mps", 0)), 2)))
             v_el.set("state", str(v.get("state", "driving")))
             v_el.set("wait_time", str(round(float(v.get("wait_time", 0)), 2)))
+            v_el.set("movement", str(v.get("movement", "straight")))
+            v_el.set("lane_index", str(int(v.get("lane_index", 0))))
+            if "x" in v:                                   # world position: consumers need no road geometry
+                v_el.set("x", str(round(float(v["x"]), 2)))
+                v_el.set("z", str(round(float(v["z"]), 2)))
+                v_el.set("heading", str(round(float(v.get("heading", 0.0)), 3)))
 
         # <pedestrians>
         pedestrians = state.get("pedestrians", [])
@@ -63,6 +69,9 @@ class SimStateExporter:
             p_el.set("wait_time", str(round(float(p.get("wait_time", 0)), 2)))
             p_el.set("direction", str(int(p.get("direction", 1))))
             p_el.set("offset", str(round(float(p.get("offset", 0.0)), 2)))
+            if "x" in p:
+                p_el.set("x", str(round(float(p["x"]), 2)))
+                p_el.set("z", str(round(float(p["z"]), 2)))
 
         # <metrics>
         metrics = state.get("metrics", {})

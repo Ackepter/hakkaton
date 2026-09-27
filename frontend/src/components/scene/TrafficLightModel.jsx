@@ -1,20 +1,11 @@
 /**
  * TrafficLightModel — pole + housing + 3 bulbs.
  *
- * The bulbs sit on the local +Z face. Each head must face the drivers APPROACHING it, and stand on
- * the driver's right-hand side just before the stop line:
- *   north arm: traffic comes from -Z heading +Z -> head faces -Z (rotY = PI),   pole at x=-7
- *   south arm: traffic comes from +Z heading -Z -> head faces +Z (rotY = 0),    pole at x=+7
- *   east  arm: traffic comes from +X heading -X -> head faces +X (rotY = PI/2), pole at z=-7
- *   west  arm: traffic comes from -X heading +X -> head faces -X (rotY = -PI/2), pole at z=+7
+ * The bulbs sit on the local +Z face. Each head must face the drivers APPROACHING it and stand on the driver's
+ * right-hand side just past the stop line (`pos` = builder/geometry.lightPole, it grows with the number of lanes):
+ *   north arm: traffic comes from -Z heading +Z -> head faces -Z (rotY = PI)
+ *   south arm: head faces +Z (rotY = 0)     east arm: head faces +X (PI/2)     west arm: head faces -X (-PI/2)
  */
-const LIGHT_POSITIONS = {
-  north: [-7, 0, -22],
-  south: [7, 0, 22],
-  east: [22, 0, -7],
-  west: [-22, 0, 7],
-}
-
 const LIGHT_ROTATIONS = {
   north: [0, Math.PI, 0],
   south: [0, 0, 0],
@@ -39,8 +30,8 @@ function Bulb({ y, color }) {
   )
 }
 
-export default function TrafficLightModel({ direction, state }) {
-  const pos = LIGHT_POSITIONS[direction] || [0, 0, 0]
+export default function TrafficLightModel({ direction, state, pos: xz = [0, 0] }) {
+  const pos = [xz[0], 0, xz[1]]
   const rot = LIGHT_ROTATIONS[direction] || [0, 0, 0]
   const c = BULB[state] || BULB.RED
 

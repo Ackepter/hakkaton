@@ -10,10 +10,13 @@ import SceneryObject from './SceneryModels'
 import CameraModel from './CameraModel'
 import { SCENE_TYPES, footprint, hitsRoad, nearestArm, crossingId, snap } from '../../builder/geometry'
 
+import { NEW_CAMERA } from '../../builder/useLayoutDraft'
+
 export default function BuildLayer({ layout, tool, selection, setSelection, actions, settle, rotation, setDragging,
                                      onSpawn, mode, cameraStatus }) {
   const [cursor, setCursor] = useState(null)
   const drag = useRef(null)
+  const pickedAt = useRef(0)                 // the click that ends a pick must not reach the ground (it would deselect at once)
   const { gl } = useThree()
 
   const place = tool && tool.startsWith('place:') ? tool.slice(6) : null
@@ -57,6 +60,7 @@ export default function BuildLayer({ layout, tool, selection, setSelection, acti
 
   const onGroundClick = (e) => {
     if (e.delta > 4 || e.button !== 0) return             // a camera orbit gesture is not a click
+    if (performance.now() - pickedAt.current < 600) return  // this click selected an object
     const p = world(e)
     if (spawn) {
       const arm = nearestArm(e.point.x, e.point.z)
@@ -74,6 +78,7 @@ export default function BuildLayer({ layout, tool, selection, setSelection, acti
     e.stopPropagation()
     if (tool === 'delete') { actions.remove(kind, id); setSelection(null); return }
     if (tool !== 'select') return
+    pickedAt.current = performance.now()
     setSelection({ kind, id })
     drag.current = { kind, id, moved: false }
     setDragging(true)
@@ -103,7 +108,7 @@ export default function BuildLayer({ layout, tool, selection, setSelection, acti
       ))}
 
       {mode === 'build' && layout.cameras.map(c => (
-        <CameraModel key={c.id} label={c.id} mast={[c.x, c.z]} view={[c.x, c.z]} radius={c.radius_m}
+        <CameraModel key={c.id} cam={c} label={c.id}
                      healthy={cameraStatus(c.id)} dim={!c.enabled}
                      selected={selection?.kind === 'camera' && selection.id === c.id} pickable
                      onPointerDown={startDrag('camera', c.id)} />
@@ -111,7 +116,7 @@ export default function BuildLayer({ layout, tool, selection, setSelection, acti
 
       {ghost && <SceneryObject obj={ghost} opacity={0.6} ring={ghostValid ? 'valid' : 'invalid'} />}
       {isCamera && cursor && (
-        <CameraModel label="new camera" mast={[cursor.x, cursor.z]} view={[cursor.x, cursor.z]} radius={50} dim />
+        <CameraModel label="new camera" cam={{ ...NEW_CAMERA, x: cursor.x, z: cursor.z }} dim />
       )}
     </group>
   )

@@ -1,5 +1,6 @@
 """
-Fixed 4-way intersection world layout.
+Intersection world built from a layout (lanes, lights, crossings). The numbers below describe the default
+crossroads (one lane each way, 32 m box); wider layouts scale the box, see layout.box_half().
 
 Coordinate system (top view):
   - X axis: West → East
@@ -43,61 +44,69 @@ def build_world(layout=None):
 
 def _build_lanes(layout):
     """
-    8 inbound lanes (one per direction, but 2 lanes per arm, so actually 8 total):
-    north-in, south-in, east-in, west-in  (approaching)
-    north-out, south-out, east-out, west-out  (leaving)
-
-    For simplicity: 1 primary inbound lane per direction (queuing) + outbound
+    Inbound lane `{arm}-in` (lane 0), `{arm}-in-1` ... and outbound `{arm}-out`, `{arm}-out-1` ... for every enabled arm.
+    An inbound lane is the shared approach of all movements that start on it; the routes themselves are
+    geometry.build_paths(layout). Lane.length_m is the longest route on the lane.
     """
-    from ..layout import OPPOSITE
+    from ..geometry import build_paths, lane_id
+    from ..layout import stop_dist
+    paths = build_paths(layout)
+    longest = {}
+    for p in paths.values():
+        longest[p.lane_id] = max(longest.get(p.lane_id, 0.0), p.length)
     lanes = {}
     for direction in ("north", "south", "east", "west"):
         arm = layout.arms[direction]
         if not arm.enabled:
             continue
-        opposite = layout.arms[OPPOSITE[direction]]
-        # straight route: through the box into the opposite arm; a dead end just outside the box if it is missing
-        end = ARM_LENGTH + opposite.length_m if opposite.enabled else ARM_LENGTH + INTERSECTION_HALF + 6.0
-        lane_in = Lane(
-            id=f"{direction}-in",
-            direction=direction,
-            is_inbound=True,
-            length_m=end,
-            stop_line_m=ARM_LENGTH - STOP_LINE_DIST,
-            traffic_light_id=f"TL-{direction[0].upper()}",
-            spawn_pos=ARM_LENGTH - arm.length_m,
-            speed_limit=arm.speed_limit_mps,
-        )
-        lane_out = Lane(id=f"{direction}-out", direction=direction, is_inbound=False, length_m=ARM_LENGTH)
-        lanes[lane_in.id] = lane_in
-        lanes[lane_out.id] = lane_out
+        light = None if layout.junction == "roundabout" else f"TL-{direction[0].upper()}"
+        for i in range(arm.lanes_in):
+            lid = lane_id(direction, i)
+            lanes[lid] = Lane(
+                id=lid, direction=direction, is_inbound=True, length_m=longest[lid],
+                stop_line_m=ARM_LENGTH - stop_dist(layout), traffic_light_id=light,
+                spawn_pos=ARM_LENGTH - arm.length_m, speed_limit=arm.speed_limit_mps, index=i,
+            )
+        for j in range(arm.lanes_out):
+            lid = lane_id(direction, j, inbound=False)
+            lanes[lid] = Lane(id=lid, direction=direction, is_inbound=False, length_m=ARM_LENGTH, index=j)
     return lanes
 
 
 def _build_lights(layout):
-    """One light per enabled arm. Groups: NS (north+south) and EW (east+west); NS starts green."""
+    """One light per enabled arm (none on a roundabout). The first signal stage (north-south) starts green."""
     lights = {}
+    if layout.junction == "roundabout":
+        return lights
+    from ..layout import stages
+    first = set(stages(layout)[0]) if layout.enabled_arms() else set()
     for direction in ("north", "south", "east", "west"):
         if not layout.arms[direction].enabled:
             continue
         lid = f"TL-{direction[0].upper()}"
         lights[lid] = SimTrafficLight(
-            id=lid, direction=direction, state="GREEN" if direction in ("north", "south") else "RED",
+            id=lid, direction=direction, state="GREEN" if direction in first else "RED",
             phase_index=0, phase_start_time=0.0, phase_duration=30.0, phase_switches=0,
-            lane_ids=[f"{direction}-in"],
+            lane_ids=[l for l in _lane_ids(layout, direction)],
         )
     return lights
 
 
+def _lane_ids(layout, direction):
+    from ..geometry import lane_id
+    return [lane_id(direction, i) for i in range(layout.arms[direction].lanes_in)]
+
+
 def _build_crossings(layout):
     """One pedestrian crossing per enabled arm that has one."""
+    from ..geometry import crossing_geometry
     crossings = {}
     for direction in ("north", "south", "east", "west"):
-        arm = layout.arms[direction]
-        if arm.enabled and arm.crossing:
+        cg = crossing_geometry(layout, direction)
+        if cg:
             cid = f"PC-{direction[0].upper()}"
             crossings[cid] = PedestrianCrossing(id=cid, direction=direction,
-                                                traffic_light_id=f"TL-{direction[0].upper()}")
+                                                traffic_light_id=f"TL-{direction[0].upper()}", geo=cg)
     return crossings
 
 

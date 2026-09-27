@@ -11,7 +11,8 @@ from typing import Dict, Literal, Optional
 from ..engine.simulation import SimulationEngine
 from ..xml_export.exporter import SimStateExporter
 from ..scenarios.presets import SCENARIOS, get_scenario
-from ..layout import Layout, LayoutStore, presets as layout_presets, validate_layout
+from ..geometry import scene_geometry
+from ..layout import Layout, LayoutStore, junction_types, presets as layout_presets, validate_layout
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -190,6 +191,18 @@ async def list_presets():
     return {name: l.model_dump() for name, l in layout_presets().items()}
 
 
+@router.get("/layout/junction-types")
+async def list_junction_types():
+    """Catalogue of ready-made junctions (name, kind, what the logic does)."""
+    return {"types": junction_types()}
+
+
+@router.get("/geometry")
+async def get_geometry():
+    """Road geometry of the current layout (box, lanes, crossings, light poles): what a camera needs to draw and zone the road."""
+    return scene_geometry(_get_engine().layout)
+
+
 @router.get("/layouts")
 async def list_layouts():
     return {"saved": _get_store().list(), "presets": sorted(layout_presets())}
@@ -228,6 +241,8 @@ class SpawnRequest(BaseModel):
     arm: Optional[Literal["north", "south", "east", "west"]] = None
     type: str = "car"
     crossing: Optional[str] = None
+    lane: Optional[int] = Field(None, ge=0, le=3)                 # inbound lane, 0 = innermost (default: any)
+    movement: Optional[Literal["left", "straight", "right", "uturn"]] = None
 
 
 @router.post("/simulation/spawn")
@@ -237,9 +252,10 @@ async def spawn(req: SpawnRequest):
     if req.kind == "vehicle":
         if req.arm is None or f"{req.arm}-in" not in engine._lanes:
             raise HTTPException(status_code=404, detail="that arm does not exist in the current layout")
-        v = engine.spawn_vehicle(req.arm, req.type)
+        v = engine.spawn_vehicle(req.arm, req.type, req.lane, req.movement)
         if v is None:
-            raise HTTPException(status_code=409, detail="entry is blocked or the vehicle type is unknown")
+            raise HTTPException(status_code=409, detail="entry is blocked, the vehicle type is unknown, or that lane / movement "
+                                                        "does not exist")
         return {"id": v.id}
     if req.crossing is None or req.crossing not in engine._crossings:
         raise HTTPException(status_code=404, detail="that crosswalk does not exist in the current layout")

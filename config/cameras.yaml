@@ -8,6 +8,12 @@
 # zones:    polygons in normalised image coordinates (0..1, origin top-left). Lane zones are counted for vehicles,
 #           pedestrian zones for people. A simulation camera generates its zones automatically.
 #
+# mount:    x, z, height_m, yaw_deg, pitch_deg, fov_deg, range_m describe where a camera hangs and where it looks
+#           (metres; yaw = compass bearing 0 = north, pitch = downward tilt, fov = horizontal angle). Leave them out
+#           for the default overhead camera above the middle of the junction. Give them to a REAL camera (usb, file,
+#           network) as well: the lane and crosswalk zones are then projected into its image automatically, exactly as
+#           for the virtual camera (measure the mast on the mock-up, no polygons to draw by hand).
+#
 # A camera is NOT required to start the backend or the Dashboard.
 
 cameras:
@@ -18,7 +24,7 @@ cameras:
     detector: virtual
     fps: 5
     width: 640
-    height: 640
+    height: 480                       # 4:3 like a USB camera
     confidence: 0.5
     timeout_s: 2.0                    # no frame for this long -> camera lost -> FAILSAFE
     reconnect_s: 3.0
@@ -42,6 +48,10 @@ cameras:
 #      ambulance: emergency
 #      police car: emergency
 #      fire truck: emergency
+#    x: -20                          # optional mount -> zones are generated from the simulation road geometry
+#    z: -20
+#    height_m: 12
+#    fov_deg: 70
 #    zones:
 #      - {id: north-in, kind: lane,       direction: north, capacity: 8,  polygon: [[0.40,0.05],[0.55,0.05],[0.55,0.45],[0.40,0.45]]}
 #      - {id: east-in,  kind: lane,       direction: east,  capacity: 8,  polygon: [[0.60,0.45],[0.95,0.45],[0.95,0.60],[0.60,0.60]]}

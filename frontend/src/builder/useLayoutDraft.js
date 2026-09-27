@@ -1,7 +1,17 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { BUILDING_COLORS, nextId } from './geometry'
+import { ARMS, BUILDING_COLORS, footprint, hitsRoad, minArmLength, nextId } from './geometry'
 
 const clone = (o) => JSON.parse(JSON.stringify(o))
+
+/** After a road change: lengthen arms the bigger centre needs, drop decoration that now stands on the asphalt (undo restores it). */
+function refit(l) {
+  const need = minArmLength(l)
+  for (const k of ARMS) if (l.arms[k].enabled && l.arms[k].length_m < need) l.arms[k].length_m = Math.min(80, Math.ceil(need))
+  l.scenery = l.scenery.filter(o => !hitsRoad(l, o.x, o.z, footprint(o)))
+}
+
+/** A newly placed camera: 12 m mast, 70 degrees, aimed at the middle of the junction (yaw / pitch null = automatic). */
+export const NEW_CAMERA = { radius_m: 90, enabled: true, height_m: 12, fov_deg: 70, yaw_deg: null, pitch_deg: null }
 const MAX_HISTORY = 60
 
 /**
@@ -92,7 +102,7 @@ export default function useLayoutDraft() {
       let id = null
       commit(l => {
         id = nextId(l, 'CAM')
-        l.cameras.push({ id, x, z, radius_m: 50, enabled: true })
+        l.cameras.push({ id, x, z, ...NEW_CAMERA })
       })
       return id
     },
@@ -108,7 +118,29 @@ export default function useLayoutDraft() {
       const o = (kind === 'camera' ? l.cameras : l.scenery).find(i => i.id === id)
       if (o) { o.x = x; o.z = z }
     }),
-    updateArm: (arm, patch) => commit(l => { Object.assign(l.arms[arm], patch) }),
+    updateArm: (arm, patch) => commit(l => {
+      const a = l.arms[arm]
+      Object.assign(a, patch)
+      if (patch.lanes_in !== undefined && a.turns) {              // keep one movement list per inbound lane
+        while (a.turns.length < a.lanes_in) a.turns.push(['straight'])
+        a.turns.length = a.lanes_in
+      }
+      refit(l)
+    }),
+    setLaneTurns: (arm, lane, moves) => commit(l => {              // moves: at least one of left / straight / right / uturn
+      const a = l.arms[arm]
+      if (!a.turns) a.turns = Array.from({ length: a.lanes_in ?? 1 }, () => ['straight'])
+      a.turns[lane] = moves.length ? moves : ['straight']
+    }),
+    setJunction: (junction) => commit(l => {
+      l.junction = junction
+      if (junction === 'roundabout') for (const k of ARMS) {
+        const a = l.arms[k]
+        a.lanes_in = Math.min(a.lanes_in ?? 1, 2); a.lanes_out = Math.min(a.lanes_out ?? 1, 2)
+        if (a.turns) a.turns.length = a.lanes_in
+      }
+      refit(l)
+    }),
     updateSignal: (patch) => commit(l => { Object.assign(l.signal, patch) }),
     setProgram: (program) => commit(l => { l.signal.program = program }),
     updateTraffic: (patch) => commit(l => { Object.assign(l.traffic, patch) }),

@@ -9,14 +9,14 @@ from typing import Optional
 # ---------- Vehicle ----------
 
 VEHICLE_DEFAULTS = {
-    "car":       {"max_speed": 13.9, "length_m": 4.5,  "accel": 3.0, "decel": 5.0, "color": "car"},
-    "truck":     {"max_speed": 11.0, "length_m": 12.0, "accel": 1.5, "decel": 3.5, "color": "truck"},
-    "bus":       {"max_speed": 11.0, "length_m": 12.0, "accel": 1.5, "decel": 3.5, "color": "bus"},
-    "tram":      {"max_speed": 9.0,  "length_m": 20.0, "accel": 1.0, "decel": 2.5, "color": "tram"},
-    "emergency": {"max_speed": 16.7, "length_m": 5.5,  "accel": 4.0, "decel": 6.0, "color": "emergency"},
-    "taxi":      {"max_speed": 13.9, "length_m": 4.5,  "accel": 3.0, "decel": 5.0, "color": "taxi"},
-    "motorcycle":{"max_speed": 16.7, "length_m": 2.2,  "accel": 5.0, "decel": 7.0, "color": "motorcycle"},
-    "bicycle":   {"max_speed": 5.5,  "length_m": 1.8,  "accel": 1.5, "decel": 3.0, "color": "bicycle"},
+    "car":       {"width_m": 2.0, "max_speed": 13.9, "length_m": 4.5,  "accel": 3.0, "decel": 5.0, "color": "car"},
+    "truck":     {"width_m": 2.5, "max_speed": 11.0, "length_m": 12.0, "accel": 1.5, "decel": 3.5, "color": "truck"},
+    "bus":       {"width_m": 2.5, "max_speed": 11.0, "length_m": 12.0, "accel": 1.5, "decel": 3.5, "color": "bus"},
+    "tram":      {"width_m": 2.6, "max_speed": 9.0,  "length_m": 20.0, "accel": 1.0, "decel": 2.5, "color": "tram"},
+    "emergency": {"width_m": 2.2, "max_speed": 16.7, "length_m": 5.5,  "accel": 4.0, "decel": 6.0, "color": "emergency"},
+    "taxi":      {"width_m": 2.0, "max_speed": 13.9, "length_m": 4.5,  "accel": 3.0, "decel": 5.0, "color": "taxi"},
+    "motorcycle":{"width_m": 0.8, "max_speed": 16.7, "length_m": 2.2,  "accel": 5.0, "decel": 7.0, "color": "motorcycle"},
+    "bicycle":   {"width_m": 0.6, "max_speed": 5.5,  "length_m": 1.8,  "accel": 1.5, "decel": 3.0, "color": "bicycle"},
 }
 
 VEHICLE_STATES = ("driving", "decelerating", "waiting", "passing", "finished")
@@ -39,6 +39,17 @@ class Vehicle:
     spawn_time: float        # simulation time at spawn
     wait_time: float         # accumulated wait time
     passed_intersection: bool = False
+    path_id: str = ""        # the route this vehicle follows (see geometry.Path)
+    movement: str = "straight"   # left / straight / right / uturn
+    lane_index: int = 0      # inbound lane, 0 = innermost
+    exit_arm: str = ""
+    seq: int = 0             # spawn order: older vehicles have priority where paths merge or cross
+    x: float = 0.0           # world position of the vehicle centre (metres), refreshed by the engine
+    z: float = 0.0
+    heading: float = 0.0     # atan2(dz, dx) of the direction of travel
+    yielding: bool = False   # standing because a merge / crossing / leader blocks it (not a red light)
+    path_len: float = 0.0    # length of the route; 0 = use the lane length
+    width_m: float = 2.0
 
 
 @dataclass
@@ -54,6 +65,8 @@ class Pedestrian:
     direction: int = 1        # +1 / -1: which side of the crosswalk the pedestrian starts from
     offset: float = 0.0       # lateral lane inside the crosswalk band (meters)
     stand_position: float = 0.0  # where the pedestrian waits (0 = curb, negative = queued behind it)
+    x: float = 0.0           # world position, refreshed by the engine
+    z: float = 0.0
 
 
 @dataclass
@@ -79,6 +92,7 @@ class Lane:
     traffic_light_id: Optional[str] = None
     spawn_pos: float = 0.0    # position_m where vehicles enter (arms shorter than 80 m start later)
     speed_limit: float = 25.0 # m/s
+    index: int = 0            # lane number inside its arm, 0 = innermost
 
 
 @dataclass
@@ -88,6 +102,7 @@ class PedestrianCrossing:
     traffic_light_id: str # pedestrian signal (GREEN = walk)
     waiting_peds: int = 0
     crossing_peds: int = 0
+    geo: dict = None          # geometry.crossing_geometry(): where the walkway is and how wide
 
 
 @dataclass

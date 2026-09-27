@@ -84,7 +84,22 @@
     <xs:attribute name="speed_mps"    type="xs:decimal" use="required"/>
     <xs:attribute name="state"        type="VehicleStateEnum" use="required"/>
     <xs:attribute name="wait_time"    type="xs:decimal" use="required"/>
+    <xs:attribute name="movement"     type="MovementEnum" use="optional"/>
+    <xs:attribute name="lane_index"   type="xs:integer" use="optional"/>
+    <!-- world position of the vehicle centre (metres, x west->east, z north->south) and heading atan2(dz, dx) -->
+    <xs:attribute name="x"            type="xs:decimal" use="optional"/>
+    <xs:attribute name="z"            type="xs:decimal" use="optional"/>
+    <xs:attribute name="heading"      type="xs:decimal" use="optional"/>
   </xs:complexType>
+
+  <xs:simpleType name="MovementEnum">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="left"/>
+      <xs:enumeration value="straight"/>
+      <xs:enumeration value="right"/>
+      <xs:enumeration value="uturn"/>
+    </xs:restriction>
+  </xs:simpleType>
 
   <xs:simpleType name="VehicleStateEnum">
     <xs:restriction base="xs:string">
@@ -112,6 +127,8 @@
     <xs:attribute name="wait_time"   type="xs:decimal" use="required"/>
     <xs:attribute name="direction"   type="xs:integer" use="optional"/>
     <xs:attribute name="offset"      type="xs:decimal" use="optional"/>
+    <xs:attribute name="x"           type="xs:decimal" use="optional"/>
+    <xs:attribute name="z"           type="xs:decimal" use="optional"/>
   </xs:complexType>
 
   <xs:simpleType name="PedStateEnum">

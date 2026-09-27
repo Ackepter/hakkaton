@@ -12,7 +12,7 @@ import TrafficLightModel from './TrafficLightModel'
 import CameraModel from './CameraModel'
 import { SceneryLayer } from './SceneryModels'
 import BuildLayer from './BuildLayer'
-import { ARMS } from '../../builder/geometry'
+import { ARMS, defaultCamera, lightPole } from '../../builder/geometry'
 
 const MOUSE_BUILD = { LEFT: -1, MIDDLE: 1, RIGHT: 0 }      // build mode: left click is for tools, right drag orbits
 
@@ -23,9 +23,10 @@ export default function IntersectionScene({
 }) {
   const [dragging, setDragging] = useState(false)
   const build = mode === 'build'
-  const shownLights = build
-    ? ARMS.filter(a => layout.arms[a].enabled).map(a => ({ id: `TL-${a[0].toUpperCase()}`, direction: a, state: 'RED' }))
-    : lights
+  const roundabout = layout.junction === 'roundabout'
+  const shownLights = (build
+    ? ARMS.filter(a => layout.arms[a].enabled && !roundabout).map(a => ({ id: `TL-${a[0].toUpperCase()}`, direction: a, state: 'RED' }))
+    : lights).map(l => ({ ...l, pos: lightPole(layout, l.direction) }))
 
   return (
     <Canvas shadows camera={{ position: [0, 90, 90], fov: 45, near: 1, far: 900 }}
@@ -43,10 +44,10 @@ export default function IntersectionScene({
       {!build && <SceneryLayer objects={layout.scenery} />}
 
       {!build && layout.cameras.filter(c => c.enabled).map(c => (
-        <CameraModel key={c.id} label={c.id} mast={[c.x, c.z]} view={[c.x, c.z]} radius={c.radius_m} healthy={cameraStatus(c.id)} />
+        <CameraModel key={c.id} cam={c} label={c.id} healthy={cameraStatus(c.id)} />
       ))}
       {!build && layout.cameras.filter(c => c.enabled).length === 0 && (
-        <CameraModel label="CAM-01" mast={[-11, -11]} view={[0, 0]} radius={64} healthy={cameraStatus('CAM-01')} />
+        <CameraModel cam={defaultCamera(layout)} label="CAM-01" overhead healthy={cameraStatus('CAM-01')} />
       )}
 
       {shownLights.map(l => <TrafficLightModel key={l.id} {...l} />)}

@@ -24,8 +24,9 @@ const LIGHT_COLORS = { RED: '#ef4444', YELLOW: '#fbbf24', GREEN: '#22c55e' }
 const NAV_H = 56
 
 const FALLBACK_LAYOUT = {
-  version: 1, name: 'Crossroads', scenery: [], cameras: [],
-  arms: Object.fromEntries(ARMS.map(a => [a, { enabled: true, length_m: 80, lane_type: 'mixed', speed_limit_mps: 13.9, crossing: true, weight: 1 }])),
+  version: 1, name: 'Crossroads', junction: 'signal', scenery: [], cameras: [],
+  arms: Object.fromEntries(ARMS.map(a => [a, { enabled: true, length_m: 80, lane_type: 'mixed', lanes_in: 1, lanes_out: 1, turns: null,
+                                                speed_limit_mps: 13.9, crossing: true, weight: 1 }])),
   signal: { mode: 'adaptive', base_green: 30, min_green: 8, max_green: 60, yellow: 3, all_red: 3, program: [] },
   traffic: { spawn_rate: 12, ped_spawn_rate: 5, type_probs: { car: 0.75, truck: 0.1, bus: 0.1, tram: 0.04, emergency: 0.01 } },
 }
@@ -33,7 +34,7 @@ const FALLBACK_LAYOUT = {
 const HINTS = {
   select: 'Click an object to select it, drag to move it. Right mouse button rotates the view, wheel zooms.',
   delete: 'Click an object to delete it.',
-  camera: 'Click to place a camera (its dashed square is the area it watches).',
+  camera: 'Click to place a camera; select it to set height, field of view and aim. The dashed area is what it sees.',
 }
 
 export default function Simulation3D() {
@@ -56,6 +57,7 @@ export default function Simulation3D() {
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState([])
   const [presets, setPresets] = useState({})
+  const [junctionTypes, setJunctionTypes] = useState([])
   const d = useLayoutDraft()
   const { draft } = d
 
@@ -110,6 +112,7 @@ export default function Simulation3D() {
   const refreshCities = useCallback(async () => {
     try { setSaved((await layoutApi.list()).saved) } catch {}
     try { setPresets(await layoutApi.presets()) } catch {}
+    try { setJunctionTypes(await layoutApi.junctionTypes()) } catch {}
   }, [])
   useEffect(() => { if (mode === 'build') refreshCities() }, [mode, refreshCities])
 
@@ -221,7 +224,7 @@ export default function Simulation3D() {
                         canUndo={d.canUndo} canRedo={d.canRedo} tool={tool} setTool={setTool} rotation={rotation}
                         setRotation={setRotation} selection={selection} clear={() => setSelection(null)}
                         errors={errors} busy={busy} message={message} onApply={apply} onPlay={play} tab={tab} setTab={setTab}
-                        saved={saved} presets={presets} onSave={save} onLoadSaved={loadSaved}
+                        saved={saved} presets={presets} junctionTypes={junctionTypes} onSave={save} onLoadSaved={loadSaved}
                         onLoadPreset={(n) => useLayout(presets[n], `"${n}"`)} onDeleteSaved={deleteSaved}
                         onDownload={download} onUpload={upload} />
         ) : (

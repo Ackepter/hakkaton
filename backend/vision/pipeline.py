@@ -356,5 +356,5 @@ def build_manager(configs: List[CameraConfig], *, ped_priority_threshold: int = 
             continue                                             # configured but switched off in cameras.yaml
         source = source_factory(cfg)
         zones = cfg.zones or getattr(source, "zones", None) or [full_frame_zone()]
-        pipelines.append(CameraPipeline(cfg, source, detector_factory(cfg), TrafficAnalyzer(zones, ped_priority_threshold)))
+        pipelines.append(CameraPipeline(cfg, source, detector_factory(cfg), TrafficAnalyzer(zones, ped_priority_threshold, foot_zones=cfg.calibrated)))
     return VisionManager(pipelines, on_health=on_health, on_snapshot=on_snapshot)

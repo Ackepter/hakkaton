@@ -11,7 +11,8 @@ from backend.core import app_state
 from backend.main import app
 from backend.models.schemas import SystemMode
 from backend.vision import sources
-from smart_intersection.layout import CameraObject, default_layout, presets
+from smart_intersection.geometry import scene_geometry
+from smart_intersection.layout import CameraObject, Layout, default_layout, presets
 from .vision_helpers import sim_xml
 from .test_vision_api import wait
 
@@ -44,9 +45,14 @@ def client(tmp_path, monkeypatch):
 
     async def fake_layout(self):
         return Holder.layout
+
+    async def fake_geometry(self):
+        return scene_geometry(Layout.model_validate(Holder.layout))
     monkeypatch.setattr(type(app_state), "_fetch_layout", fake_layout)
+    monkeypatch.setattr(type(app_state), "_fetch_geometry", fake_geometry)
     monkeypatch.setattr(sources.SimulationSource, "_http_fetch", lambda self: Holder.xml)
-    monkeypatch.setattr(sources.SimulationSource, "_http_layout", lambda self: Holder.layout["arms"])
+    monkeypatch.setattr(sources.SimulationSource, "_http_geometry",
+                        lambda self: scene_geometry(Layout.model_validate(Holder.layout)))
     with TestClient(app) as c:
         wait(lambda: c.get("/api/vision/cameras").json()["cameras"][0]["frames"] >= 2)
         yield c
@@ -77,7 +83,8 @@ def test_zones_follow_the_arms_and_crosswalks_that_exist(client):
 
 def test_placed_cameras_replace_the_simulation_camera_and_split_the_zones(client):
     l = default_layout()
-    l.cameras = [CameraObject(id="CAM-A", x=-25, z=-25, radius_m=45), CameraObject(id="CAM-B", x=25, z=25, radius_m=45)]
+    l.cameras = [CameraObject(id="CAM-A", x=-25, z=-25, radius_m=45, fov_deg=90),
+                 CameraObject(id="CAM-B", x=25, z=25, radius_m=45, fov_deg=90)]
     Holder.layout = l.model_dump()
     r = client.post("/api/vision/sync-layout").json()
     assert r["changed"] and set(r["cameras"]) == {"CAM-A", "CAM-B"}
@@ -86,7 +93,7 @@ def test_placed_cameras_replace_the_simulation_camera_and_split_the_zones(client
     assert z["CAM-A"] | z["CAM-B"] <= {f"{a}-in" for a in ("north", "south", "east", "west")} | {
         "PC-N", "PC-S", "PC-E", "PC-W"}
     cam = app_state.vision.pipelines["CAM-A"].cfg
-    assert (cam.view_x, cam.view_z, cam.view_radius_m) == (-25, -25, 45)
+    assert (cam.x, cam.z, cam.range_m, cam.fov_deg) == (-25, -25, 45, 90)
     assert wait(lambda: all(c["frames"] >= 2 for c in client.get("/api/vision/cameras").json()["cameras"]))
 
 
@@ -103,7 +110,7 @@ def test_disabled_layout_cameras_are_ignored_and_second_sync_is_a_noop(client):
 
 def test_a_camera_that_sees_no_zone_still_runs(client):
     l = default_layout()
-    l.cameras = [CameraObject(id="CAM-FAR", x=110, z=110, radius_m=20)]
+    l.cameras = [CameraObject(id="CAM-FAR", x=110, z=110, radius_m=20)]              # 20 m range, 150 m from the junction
     Holder.layout = l.model_dump()
     client.post("/api/vision/sync-layout")
     assert zones(client)["CAM-FAR"] == {"no-zones"}
@@ -116,10 +123,11 @@ def test_camera_picture_follows_the_layout(client):
     l = default_layout()
     l.arms["east"].enabled = False
     Holder.layout = l.model_dump()
-    time.sleep(3.3)                                                        # the source refreshes the layout every 3 s
+    time.sleep(3.3)                                                        # the source refreshes the geometry every 3 s
     img = Image.open(__import__("io").BytesIO(client.get("/api/vision/cameras/CAM-01/snapshot.jpg?overlay=false").content))
-    w, h = img.size
-    east_road = img.convert("RGB").getpixel((int(w * 0.9), h // 2))
+    cam = app_state.vision.pipelines["CAM-01"].source._view.cam
+    px, py, _ = cam.project(35, 0, 2)                                        # a lane centre of the (removed) east road
+    east_road = img.convert("RGB").getpixel((int(px * img.size[0] / cam.w), int(py * img.size[1] / cam.h)))
     assert east_road[1] > 100 and east_road[0] < 100                        # green grass where the east road was
 
 
@@ -143,7 +151,11 @@ def test_yaml_cameras_of_other_kinds_survive_a_sync(tmp_path, monkeypatch):
 
     async def fake_layout(self):
         return presets()["T-junction"].model_dump()
+
+    async def fake_geometry(self):
+        return scene_geometry(presets()["T-junction"])
     monkeypatch.setattr(type(app_state), "_fetch_layout", fake_layout)
+    monkeypatch.setattr(type(app_state), "_fetch_geometry", fake_geometry)
     with TestClient(app) as c:
         assert c.post("/api/vision/sync-layout").status_code == 200
         ids = {x["id"] for x in c.get("/api/vision/cameras").json()["cameras"]}
