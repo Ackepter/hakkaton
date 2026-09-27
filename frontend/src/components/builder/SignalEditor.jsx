@@ -87,7 +87,7 @@ export default function SignalEditor({ signal, actions, layout }) {
           <Select value={signal.mode} testid="signal-mode" onChange={v => actions.updateSignal({ mode: v })}
                   options={[{ value: 'adaptive', label: 'Adaptive (reacts to traffic)' }, { value: 'fixed', label: 'My program (fixed)' }]} />
         </Row>
-        {roundabout && <div style={{ fontSize: 11, color: C.faint }}>A roundabout has no lights: vehicles give way on the ring. These settings apply when you switch back to traffic lights.</div>}
+        {roundabout && <div style={{ fontSize: 11, color: C.faint }}>These lights meter entry onto the ring; a car with green still gives way to traffic already circulating.</div>}
         {split && <div style={{ fontSize: 11, color: C.faint }}>This junction has turn lanes: every arm gets its own protected green, so the program sets one lamp per arm.</div>}
       </Section>
 

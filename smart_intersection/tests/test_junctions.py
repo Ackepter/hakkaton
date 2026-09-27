@@ -345,10 +345,12 @@ def test_pedestrian_positions_are_world_coordinates_inside_the_crosswalk_band():
 
 # ------------------------------------------------------------------------------------------ the roundabout
 
-def test_a_roundabout_has_no_lights_and_no_crosswalks_but_a_ring_everybody_uses():
+def test_a_roundabout_has_lights_and_crosswalks_and_a_ring_everybody_uses():
+    """A roundabout is metered the same way as a crossroads (Task 1: everything must run through tunable signals);
+    the ring's own give-way rules are an extra safety layer underneath, not a replacement for the lights."""
     l = presets()["Roundabout"]
     e = SimulationEngine(seed=2, layout=l)
-    assert not e._lights and not e._crossings and e._stages == [] and e.get_state()["junction"] == "roundabout"
+    assert len(e._lights) == 4 and len(e._crossings) == 4 and e._stages and e.get_state()["junction"] == "roundabout"
     e.configure(spawn_rate=30.0)
     exits = set()
     for _ in range(1800):
@@ -358,6 +360,28 @@ def test_a_roundabout_has_no_lights_and_no_crosswalks_but_a_ring_everybody_uses(
     assert len({b for _, b in exits}) == 4                                       # every arm is an exit ...
     assert any(a == b for a, b in exits)                                         # ... including the u-turn round the island
     assert e.get_state()["metrics"]["passed_total"] > 30
+
+
+def test_a_red_light_stops_vehicles_before_they_reach_the_ring():
+    """Vehicle logic must depend on the light, not the other way round: force red on one arm and nothing from it
+    reaches the ring, however long it waits — the ring's give-way rules never let it slip through on their own."""
+    l = presets()["Roundabout"]
+    e = SimulationEngine(seed=3, layout=l)
+    e.set_light_state("TL-N", "RED")
+    for a in ("south", "east", "west"):
+        e.set_light_state(f"TL-{a[0].upper()}", "GREEN")
+    e.configure(spawn_rate=60.0)
+    e.advance(90)
+    for v in e._vehicles.values():
+        if v.direction != "north":
+            continue
+        path = e._paths[v.path_id]
+        assert v.position_m + v.length_m / 2 <= e._lanes[v.lane_id].stop_line_m + 0.3
+        assert v.position_m - v.length_m / 2 < path.box_entry_s                  # never reached the ring
+    e.set_light_state("TL-N", "AUTO")
+    e.advance(60)
+    assert any(v.direction == "north" and e._paths[v.path_id].box_entry_s < v.position_m
+              for v in e._vehicles.values()) or e.get_state()["metrics"]["passed_total"] > 0
 
 
 def test_vehicles_on_the_ring_keep_the_ring_and_entering_ones_give_way():
@@ -532,7 +556,7 @@ def test_api_serves_geometry_and_the_junction_catalogue(client):
     assert g["box_half"] == 24 and len(g["lanes"]) == 16 and {a["lanes_in"] for a in g["arms"]} == {4}
     assert client.put("/layout", json=presets()["Roundabout"].model_dump()).status_code == 200
     g = client.get("/geometry").json()
-    assert g["island"]["radius"] == 12 and g["lights"] == [] and g["crossings"] == []
+    assert g["island"]["radius"] == 12 and len(g["lights"]) == 4 and len(g["crossings"]) == 4
 
 
 def test_api_spawns_on_a_lane_with_a_movement(client):

@@ -96,7 +96,7 @@ class SimulationEngine:
         self._use_zones = needs_zones(self._paths, self.layout)
         self._zones, self._follow = path_zones(self._paths, zone_region(self.layout)) if self._use_zones else ({}, {})
         self._split: Dict[tuple, int] = {}
-        self._stages = [] if self._roundabout else layout_stages(self.layout)
+        self._stages = layout_stages(self.layout)
         self._crossing_stages = crossing_stages(self.layout)
         self._blockers = {cid: [a for a in self.layout.enabled_arms() if cg.direction in blocked_crossings(self.layout, (a,))]
                           for cid, cg in self._crossings.items()}
@@ -126,11 +126,12 @@ class SimulationEngine:
     def _build_program(self) -> List[tuple]:
         """
         [(lamp per arm, duration)]. Adaptive: three phases (green, yellow, all-red) per stage, in stage order.
-        Fixed: the user program, phase by phase. A roundabout has no lamps: one endless dummy phase.
+        Fixed: the user program, phase by phase. A roundabout is metered the same way: its lights gate entry onto the
+        ring, which still does its own give-way (path_zones / ring-load); an empty layout gets one endless dummy phase.
         """
         sg = self.layout.signal
         arms = self.layout.enabled_arms()
-        if self._roundabout or not arms:
+        if not arms:
             return [({}, 60.0)]
         if self.fixed_program:
             return [({a: p.lamp(a) for a in arms}, p.duration) for p in sg.program]
@@ -410,8 +411,6 @@ class SimulationEngine:
 
     def _should_end_phase(self) -> bool:
         idx, elapsed, sg = self._phase_index, self._phase_elapsed, self.sig
-        if self._roundabout:
-            return False
         if self.fixed_program:                          # the user program is executed exactly
             return elapsed >= self._phases[idx][1]
         stage, kind = divmod(idx, 3)
@@ -588,8 +587,9 @@ class SimulationEngine:
     # --- conflict zones: who may enter which part of the box
 
     def _commit_s(self, v: Vehicle, path) -> float:
-        """Path coordinate the front must pass before the vehicle counts as committed (holds priority)."""
-        return path.box_entry_s if self._roundabout else self._lanes[v.lane_id].stop_line_m
+        """Path coordinate the front must pass before the vehicle counts as committed (holds priority): the stop line, the
+        same point its light gates — a vehicle that got its green and crossed it outranks one still waiting for green."""
+        return self._lanes[v.lane_id].stop_line_m
 
     def _zone_walls(self, vehicles: List[Vehicle]) -> Dict[str, float]:
         """

@@ -59,7 +59,7 @@ def _build_lanes(layout):
         arm = layout.arms[direction]
         if not arm.enabled:
             continue
-        light = None if layout.junction == "roundabout" else f"TL-{direction[0].upper()}"
+        light = f"TL-{direction[0].upper()}"
         for i in range(arm.lanes_in):
             lid = lane_id(direction, i)
             lanes[lid] = Lane(
@@ -74,10 +74,8 @@ def _build_lanes(layout):
 
 
 def _build_lights(layout):
-    """One light per enabled arm (none on a roundabout). The first signal stage (north-south) starts green."""
+    """One light per enabled arm, roundabout entries included: a stage machine meters every junction type the same way."""
     lights = {}
-    if layout.junction == "roundabout":
-        return lights
     from ..layout import stages
     first = set(stages(layout)[0]) if layout.enabled_arms() else set()
     for direction in ("north", "south", "east", "west"):

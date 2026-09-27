@@ -78,7 +78,7 @@ export function crossingSpan(layout, arm) {
 
 export const hasCrossing = (layout, arm) => {
   const a = layout.arms[arm]
-  return a.enabled && a.crossing && (layout.junction ?? 'signal') === 'signal'
+  return a.enabled && a.crossing
 }
 
 /** Movements every inbound lane allows (default: straight only). */

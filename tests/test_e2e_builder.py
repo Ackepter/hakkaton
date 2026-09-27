@@ -438,7 +438,7 @@ def test_the_junction_type_catalogue_loads_a_roundabout_and_back(stack):
     b.click_testid("apply")
     assert wait(lambda: server_layout(si)["junction"] == "roundabout")
     g = si.get("/geometry").json()
-    assert g["island"] is not None and g["lights"] == [] and si.get("/simulation/state").json()["lights"] == []
+    assert g["island"] is not None and len(g["lights"]) == 4 and len(si.get("/simulation/state").json()["lights"]) == 4
     b.click_testid("tab-roads")
     assert wait(lambda: b.exists("junction-kind"))
     assert not b.exists("arm-north-lane-0")                              # no arrows on a roundabout

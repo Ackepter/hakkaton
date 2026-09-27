@@ -23,9 +23,8 @@ export default function IntersectionScene({
 }) {
   const [dragging, setDragging] = useState(false)
   const build = mode === 'build'
-  const roundabout = layout.junction === 'roundabout'
   const shownLights = (build
-    ? ARMS.filter(a => layout.arms[a].enabled && !roundabout).map(a => ({ id: `TL-${a[0].toUpperCase()}`, direction: a, state: 'RED' }))
+    ? ARMS.filter(a => layout.arms[a].enabled).map(a => ({ id: `TL-${a[0].toUpperCase()}`, direction: a, state: 'RED' }))
     : lights).map(l => ({ ...l, pos: lightPole(layout, l.direction) }))
 
   return (

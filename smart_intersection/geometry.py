@@ -418,12 +418,14 @@ def light_pole(layout: Layout, arm: str) -> Tuple[float, float]:
 
 def blocked_crossings(layout: Layout, stage: Tuple[str, ...]) -> set:
     """
-    Arms whose crosswalk must stay closed while `stage` has green: its own arm and the arm its through traffic drives onto.
-    Turning vehicles (left, right, u-turn) give way to pedestrians on the crosswalk they turn into, so it stays open.
+    Arms whose crosswalk must stay closed while `stage` has green: its own arm and, on a signal junction, the arm its
+    through traffic drives onto (turning vehicles give way to pedestrians on the crosswalk they turn into, so that one
+    stays open). A roundabout's crossings sit on their own arm, before the ring, so a stage only closes its own arm.
     """
-    closed = set()
+    closed = set(stage)
+    if layout.junction == "roundabout":
+        return closed
     for arm in stage:
-        closed.add(arm)
         for i in range(layout.arms[arm].lanes_in):
             if "straight" in lane_moves(layout, arm, i) and layout.arms[OPPOSITE[arm]].enabled:
                 closed.add(OPPOSITE[arm])
@@ -465,7 +467,7 @@ def scene_geometry(layout: Layout) -> dict:
             far = min(near + approach, a.length_m)
             poly = [_pt(arm, near, lat0), _pt(arm, near, lat1), _pt(arm, far, lat1), _pt(arm, far, lat0)]
             out["lanes"].append({"id": lane_id(arm, i), "arm": arm, "index": i, "inbound": True, "polygon": poly,
-                                 "moves": lane_moves(layout, arm, i) if layout.junction == "signal" else ["roundabout"]})
+                                 "moves": ["roundabout"] if layout.junction == "roundabout" else lane_moves(layout, arm, i)})
         cg = crossing_geometry(layout, arm)
         if cg:
             c, dp = cg["center"], cg["depth"] / 2
@@ -477,6 +479,5 @@ def scene_geometry(layout: Layout) -> dict:
                 s = OUT[arm][0]
                 poly = [(s * (c - dp), lo_c), (s * (c - dp), hi_c), (s * (c + dp), hi_c), (s * (c + dp), lo_c)]
             out["crossings"].append({**cg, "id": f"PC-{arm[0].upper()}", "polygon": poly})
-        if layout.junction == "signal":
-            out["lights"].append({"id": f"TL-{arm[0].upper()}", "arm": arm, "pole": light_pole(layout, arm)})
+        out["lights"].append({"id": f"TL-{arm[0].upper()}", "arm": arm, "pole": light_pole(layout, arm)})
     return out

@@ -241,7 +241,7 @@ def crossing_span(layout: "Layout", arm: str) -> tuple:
 
 def has_crossing(layout: "Layout", arm: str) -> bool:
     a = layout.arms[arm]
-    return a.enabled and a.crossing and layout.junction == "signal"
+    return a.enabled and a.crossing
 
 
 def lane_moves(layout: "Layout", arm: str, lane: int) -> List[str]:
@@ -361,7 +361,7 @@ def validate_layout(layout: Layout) -> List[str]:
             errors.append(f"{o.type} '{o.id}' stands on the road or a crosswalk")
 
     sig = layout.signal
-    if sig.mode == "fixed" and not roundabout:
+    if sig.mode == "fixed":
         arms = layout.enabled_arms()
         for i, p in enumerate(sig.program, 1):
             open_arms = [a for a in arms if p.lamp(a) != "RED"]
@@ -554,8 +554,8 @@ JUNCTION_TYPES = {
                            "one green (north-south, then east-west); right turns yield to pedestrians."),
     "T-junction with turns": (_t_turns, "Side street from the north joins an east-west road; every movement allowed. "
                               "Three protected stages, one per arm."),
-    "Roundabout": (_roundabout, "Circle with a central island, no lights. Vehicles yield to traffic already on the ring "
-                   "and choose any exit."),
+    "Roundabout": (_roundabout, "Circle with a central island. Signals meter every entry (same adaptive/fixed logic as a "
+                   "crossroads); a vehicle that gets green still yields to traffic already on the ring, and may exit anywhere."),
     "Roundabout 2-lane entries": (_roundabout2, "Roundabout with two lanes on every entry and exit; they queue side by side and merge onto "
                                  "the one circulating lane."),
     "Avenue with U-turn": (_avenue_uturn, "4-lane avenue (2 each way) with side streets. Inner lane: left turn or U-turn. "

@@ -120,11 +120,11 @@ function RoadsTab({ draft, actions }) {
       <Section title="Junction">
         <Row label="Control">
           <Select value={draft.junction ?? 'signal'} testid="junction-kind" onChange={v => actions.setJunction(v)}
-                  options={[{ value: 'signal', label: 'Traffic lights' }, { value: 'roundabout', label: 'Roundabout (no lights)' }]} />
+                  options={[{ value: 'signal', label: 'Traffic lights' }, { value: 'roundabout', label: 'Roundabout' }]} />
         </Row>
         <div style={{ fontSize: 11, color: C.faint }}>
           Centre of the junction: {boxHalf(draft) * 2} × {boxHalf(draft) * 2} m — it grows with the widest road.
-          {round ? ' Vehicles give way to traffic on the ring and pick any exit.' : ''}
+          {round ? ' Every entry still has its own light (see the Signals tab); a car with green still gives way to traffic already on the ring, and may exit anywhere.' : ''}
         </div>
       </Section>
       {ARMS.map(arm => {
