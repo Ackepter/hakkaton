@@ -56,6 +56,16 @@ class Arm(BaseModel):
     speed_limit_mps: float = Field(13.9, ge=3.0, le=25.0)
     crossing: bool = True
     weight: float = Field(1.0, ge=0.0, le=10.0)          # share of the vehicle arrivals
+    # physical mirror of this arm's light (Task: parallel UDP output to a real signal, see smart_intersection/hardware/):
+    # empty = virtual-only. Overrides config/traffic_lights.yaml for this light id when set.
+    light_ip: Optional[str] = Field(None, max_length=64)
+    light_port: int = Field(9000, ge=1, le=65535)
+
+    @field_validator("light_ip")
+    @classmethod
+    def _light_ip(cls, v):
+        v = (v or "").strip()
+        return v or None
 
     @model_validator(mode="after")
     def _turns(self):

@@ -167,6 +167,7 @@ pytest smart_intersection/tests -v
 # Конструктор (последний тест управляет настоящим Chrome; нужны свободные порты 8000/8001/5173)
 pytest tests/test_frontend_geometry.py tests/test_vision_sync.py tests/test_e2e_builder.py -v
 pytest smart_intersection/tests/test_junctions.py -v     # полосы, повороты, развороты, кольцо, физика на всех типах
+pytest smart_intersection/tests/test_hardware.py -v      # параллельный вывод на физический светофор по IP (UDP)
 ```
 
 Тесты **не требуют** Raspberry Pi или реального оборудования.
@@ -186,7 +187,8 @@ pytest smart_intersection/tests/test_junctions.py -v     # полосы, пов�
 **кольцо**. Готовые типы (в вкладке *Cities*): Crossroads, T-junction, Two-way street, Tram avenue, Bus street, Busy
 junction, **Turn crossroads, No-left crossroads, T-junction with turns, Roundabout, Roundabout 2-lane entries,
 Avenue with U-turn (4 полосы, разворот и перестроение в левую полосу), Boulevard, Grand junction** — логика каждого
-описана в [docs/junctions.md](docs/junctions.md).
+описана в [docs/junctions.md](docs/junctions.md), там же — параллельный вывод каждого светофора на физическую
+LED-матрицу по IP (`config/traffic_lights.yaml`, протокол `task_files/traffic_light.py`).
 Подробности и формат JSON: [docs/constructor.md](docs/constructor.md).
 
 ---

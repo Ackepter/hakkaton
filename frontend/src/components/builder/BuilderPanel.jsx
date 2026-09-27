@@ -159,6 +159,15 @@ function RoadsTab({ draft, actions }) {
                   <Row label="Crosswalk"><Toggle checked={a.crossing} onChange={v => actions.updateArm(arm, { crossing: v })}
                                                   label="pedestrian crossing" testid={`arm-${arm}-crossing`} /></Row>
                 )}
+                <Row label="Real light" hint="Mirror this light's state to a physical LED-matrix signal over UDP (task_files/traffic_light.py protocol). Leave the IP blank to keep it virtual-only.">
+                  <input value={a.light_ip ?? ''} placeholder="e.g. 192.168.1.198" data-testid={`arm-${arm}-light-ip`}
+                         onChange={e => actions.updateArm(arm, { light_ip: e.target.value })}
+                         style={{ flex: 1, minWidth: 0, background: C.bg, color: C.text, border: `1px solid ${C.line}`,
+                                  borderRadius: 4, padding: '3px 6px', fontSize: 12 }} />
+                  <span style={{ color: C.faint, fontSize: 11 }}>:</span>
+                  <NumberInput value={a.light_port ?? 9000} min={1} max={65535} width={64}
+                               onChange={v => actions.updateArm(arm, { light_port: v })} testid={`arm-${arm}-light-port`} />
+                </Row>
               </>
             )}
           </div>
@@ -166,7 +175,8 @@ function RoadsTab({ draft, actions }) {
       })}
       <div style={{ fontSize: 11, color: C.faint }}>
         Each inbound lane goes where its arrows say. A straight ride into a missing road ends at a barrier. A road with left
-        turns or U-turns gets its own protected green; trams and long trucks cannot U-turn.
+        turns or U-turns gets its own protected green; trams and long trucks cannot U-turn. A road's "Real light" IP sends its
+        signal, in parallel, to an actual LED-matrix traffic light — optional, off by default.
       </div>
     </>
   )

@@ -26,7 +26,7 @@ const NAV_H = 56
 const FALLBACK_LAYOUT = {
   version: 1, name: 'Crossroads', junction: 'signal', scenery: [], cameras: [],
   arms: Object.fromEntries(ARMS.map(a => [a, { enabled: true, length_m: 80, lane_type: 'mixed', lanes_in: 1, lanes_out: 1, turns: null,
-                                                speed_limit_mps: 13.9, crossing: true, weight: 1 }])),
+                                                speed_limit_mps: 13.9, crossing: true, weight: 1, light_ip: null, light_port: 9000 }])),
   signal: { mode: 'adaptive', base_green: 30, min_green: 8, max_green: 60, yellow: 3, all_red: 3, program: [] },
   traffic: { spawn_rate: 12, ped_spawn_rate: 5, type_probs: { car: 0.75, truck: 0.1, bus: 0.1, tram: 0.04, emergency: 0.01 } },
 }

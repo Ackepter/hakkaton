@@ -493,3 +493,19 @@ def test_play_shows_turning_traffic_of_a_new_junction_type(stack):
     v = si.get("/simulation/state").json()["vehicles"][0]
     assert "x" in v and "z" in v and "heading" in v
     assert b.js("document.querySelector('canvas') !== null")
+
+
+def test_a_roads_ip_field_wires_the_light_to_a_real_signal(stack):
+    b, si = stack
+    fresh(si)
+    enter_build(b)
+    b.click_testid("tab-roads")
+    b.set_input("arm-north-light-ip", "192.168.1.198")
+    b.set_input("arm-north-light-port", "9500")
+    time.sleep(0.6)
+    b.click_testid("apply")
+    assert wait(lambda: server_layout(si)["arms"]["north"]["light_ip"] == "192.168.1.198")
+    north = server_layout(si)["arms"]["north"]
+    assert north["light_port"] == 9500
+    state = si.get("/simulation/state").json()
+    assert any(l["id"] == "TL-N" for l in state["lights"])                # the light itself is unaffected either way

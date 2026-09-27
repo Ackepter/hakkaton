@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 
 from .models import Vehicle, Pedestrian, SimTrafficLight
 from .world import build_world, ARM_LENGTH, STOP_LINE_DIST
+from ..hardware.udp_matrix import UdpMatrixLight
 from ..geometry import (blocked_crossings, build_paths, crossing_stages, divergence, needs_zones, path_zones,
                         pedestrian_xz, zone_region)
 from ..layout import Layout, default_layout, roundabout_dims, stages as layout_stages, validate_layout
@@ -72,7 +73,8 @@ INTERSECTION_HALF_DEFAULT = 16.0
 
 
 class SimulationEngine:
-    def __init__(self, seed: int = 42, tick_rate: float = 10.0, layout: Optional[Layout] = None):
+    def __init__(self, seed: int = 42, tick_rate: float = 10.0, layout: Optional[Layout] = None,
+                 light_hardware: Optional[Dict[str, UdpMatrixLight]] = None):
         self.layout = layout or default_layout()
         self.seed = seed
         self.tick_rate = tick_rate
@@ -82,6 +84,14 @@ class SimulationEngine:
         self.status = "stopped"      # stopped / running / paused
         self.scenario = "normal"
         self.intersection_id = "SI-001"
+        # optional physical mirror (Task: parallel output to a real signal by IP), keyed by light id (e.g. "TL-N"):
+        # `_default_light_hw` comes from config/traffic_lights.yaml (fixed wiring, survives layout changes); a layout
+        # can override any of it per arm (Arm.light_ip/light_port, set in the constructor) — rebuilt on every
+        # `_init_world` into `self._light_hw`, the one `_apply_lights` actually sends to. A light with neither stays
+        # virtual-only.
+        self._default_light_hw = light_hardware or {}
+        self._layout_light_hw: Dict[str, UdpMatrixLight] = {}
+        self._light_hw: Dict[str, UdpMatrixLight] = {}
 
         self._task: Optional[asyncio.Task] = None
         self._init_world()
@@ -91,6 +101,7 @@ class SimulationEngine:
         self._vehicles: Dict[str, Vehicle] = {}
         self._pedestrians: Dict[str, Pedestrian] = {}
         self._lanes, self._lights, self._crossings = build_world(self.layout)
+        self._rebuild_light_hardware()
         self._paths = build_paths(self.layout)
         self._roundabout = self.layout.junction == "roundabout"
         self._use_zones = needs_zones(self._paths, self.layout)
@@ -181,6 +192,12 @@ class SimulationEngine:
         self.status = "running"
         self._task = asyncio.create_task(self._loop())
         logger.info("SimulationEngine started (seed=%d)", self.seed)
+
+    def close_hardware(self) -> None:
+        """Close every UDP socket this engine opened for a layout-defined light IP (not the ones injected at construction — the caller owns those)."""
+        for hw in self._layout_light_hw.values():
+            hw.close()
+        self._layout_light_hw = {}
 
     async def stop(self):
         self.status = "stopped"
@@ -514,6 +531,18 @@ class SimulationEngine:
     def _peds_crossing_for(self, stage: int) -> bool:
         return any(p.state == "crossing" and self._serves(stage, p.crossing_id) for p in self._pedestrians.values())
 
+    def _rebuild_light_hardware(self) -> None:
+        """Layout-defined IPs (Arm.light_ip) win over config/traffic_lights.yaml for the same light id."""
+        for hw in self._layout_light_hw.values():
+            hw.close()
+        self._layout_light_hw = {}
+        for direction in self.layout.enabled_arms():
+            arm = self.layout.arms[direction]
+            if arm.light_ip:
+                lid = f"TL-{direction[0].upper()}"
+                self._layout_light_hw[lid] = UdpMatrixLight(lid, (arm.light_ip, arm.light_port))
+        self._light_hw = {**self._default_light_hw, **self._layout_light_hw}
+
     def _apply_lights(self):
         states, duration = self._phases[self._phase_index]
         for lid, light in self._lights.items():
@@ -523,6 +552,9 @@ class SimulationEngine:
                 light.state = states.get(light.direction, "RED")
             light.phase_index = self._phase_index
             light.phase_duration = duration
+            hw = self._light_hw.get(lid)
+            if hw is not None:
+                hw.send(light.state)          # mirror the decided state to the real signal; this never feeds back
 
     # --- traffic
 

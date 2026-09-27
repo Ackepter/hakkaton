@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .engine.simulation import SimulationEngine
 from .api.routes import router, set_engine, set_store
+from .hardware import load_light_hardware
 from .layout import LayoutStore, default_layout, validate_layout
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -24,12 +25,17 @@ async def lifespan(app: FastAPI):
     if validate_layout(layout):
         logger.warning("Stored layout is invalid, using the default one")
         layout = default_layout()
-    engine = SimulationEngine(seed=42, layout=layout)
+    lights_path = os.environ.get("SI_LIGHTS_CONFIG", str(Path(__file__).resolve().parents[1] / "config" / "traffic_lights.yaml"))
+    light_hardware = load_light_hardware(lights_path)
+    engine = SimulationEngine(seed=42, layout=layout, light_hardware=light_hardware)
     set_engine(engine)
     set_store(store)
     app.state.engine = engine
     logger.info("Smart Intersection microservice started")
     yield
+    for light in light_hardware.values():
+        light.close()
+    engine.close_hardware()
     await engine.stop()
     logger.info("Smart Intersection microservice stopped")
 
