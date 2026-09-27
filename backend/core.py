@@ -73,12 +73,21 @@ class AppState:
         except (httpx.HTTPError, ValueError):
             return None
 
-    def desired_cameras(self, layout: dict) -> List[CameraConfig]:
-        """Camera configs for this layout: yaml cameras + layout cameras, zones only for arms that exist."""
+    async def _fetch_geometry(self) -> Optional[dict]:
+        try:
+            async with httpx.AsyncClient(base_url=settings.si_base_url, timeout=2.0, trust_env=False) as c:
+                r = await c.get("/geometry")
+                return r.json() if r.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            return None
+
+    def desired_cameras(self, layout: dict, geometry: dict) -> List[CameraConfig]:
+        """
+        Camera configs for this layout: yaml cameras + layout cameras. Every camera gets the road zones it really sees:
+        the lane approaches and crosswalks of `geometry` projected through its mount (position, height, heading, tilt, FOV).
+        """
         base = load_cameras(settings.vision_config_path, settings)
-        arms = layout["arms"]
-        arms_on = [a for a, v in arms.items() if v["enabled"]]
-        crossings_on = [f"PC-{a[0].upper()}" for a in arms_on if arms[a]["crossing"]]
+        box = geometry["box_half"]
         others = [c for c in base if c.source != "simulation"]
         template = next((c for c in base if c.source == "simulation"), None)
         placed = [c for c in layout.get("cameras", []) if c.get("enabled", True)]
@@ -87,15 +96,17 @@ class AppState:
             for lc in placed:
                 cfg = dataclasses.replace(template) if template else CameraConfig()
                 cfg.id, cfg.name, cfg.source, cfg.detector = lc["id"], f"Camera {lc['id']}", "simulation", "virtual"
-                cfg.view_x, cfg.view_z, cfg.view_radius_m = lc["x"], lc["z"], lc["radius_m"]
+                cfg.x, cfg.z, cfg.range_m = lc["x"], lc["z"], lc.get("radius_m")
+                cfg.height_m, cfg.fov_deg = lc.get("height_m"), lc.get("fov_deg")
+                cfg.yaw_deg, cfg.pitch_deg = lc.get("yaw_deg"), lc.get("pitch_deg")
                 sims.append(cfg)
         elif template is not None:
             sims.append(dataclasses.replace(template))
         assigned: set = set()
-        for cfg in sims:
-            cfg.uri = cfg.uri or settings.si_base_url
-            view = SimView(cfg.width, cfg.height, cfg.view_radius_m, (cfg.view_x, cfg.view_z))
-            zones = view.default_zones(arms_on, crossings_on, skip=assigned)
+        for cfg in sims + [c for c in others if c.x is not None and not c.zones]:      # real cameras with a known mount too
+            if cfg.source == "simulation":
+                cfg.uri = cfg.uri or settings.si_base_url
+            zones = SimView(cfg.width, cfg.height, cfg.pose(box), geometry).zones(skip=assigned)
             assigned |= {z.id for z in zones}            # every zone is watched by one camera only (no double counting)
             cfg.zones = zones or [Zone("no-zones", "lane", [(-1, -1), (-1, -1), (-1, -1)], None)]
         return others + sims
@@ -103,16 +114,16 @@ class AppState:
     async def sync_layout_cameras(self) -> Optional[dict]:
         """Bring the running cameras in line with the simulation layout. None = simulation unreachable."""
         layout = await self._fetch_layout()
-        if layout is None:
+        geometry = await self._fetch_geometry() if layout is not None else None
+        if layout is None or geometry is None:
             return None
-        desired = self.desired_cameras(layout)
+        desired = self.desired_cameras(layout, geometry)
         def sig(cfg, zone_ids):
-            return (cfg.id, cfg.source, cfg.uri, cfg.view_x, cfg.view_z, cfg.view_radius_m, cfg.width, cfg.height,
-                    frozenset(zone_ids))
-        running = {sig(p.cfg, (z.id for z in p.analyzer.zones)) for p in self.vision.pipelines.values()}             if self.vision else None
-        wanted = {sig(c, (z.id for z in c.zones) if c.zones else
-                      (z.id for z in SimView(c.width, c.height, c.view_radius_m, (c.view_x, c.view_z)).default_zones()))
-                  for c in desired if c.enabled}
+            return (cfg.id, cfg.source, cfg.uri, cfg.x, cfg.z, cfg.height_m, cfg.yaw_deg, cfg.pitch_deg, cfg.fov_deg,
+                    cfg.range_m, cfg.width, cfg.height, frozenset(zone_ids))
+        running = {sig(p.cfg, (z.id for z in p.analyzer.zones) if p.cfg.zones or p.cfg.source == "simulation" else ())
+                   for p in self.vision.pipelines.values()} if self.vision else None
+        wanted = {sig(c, (z.id for z in c.zones)) for c in desired if c.enabled}
         if running is not None and running == wanted:
             return {"changed": False, "cameras": [p.cfg.id for p in self.vision.pipelines.values()]}
         await self.stop_vision()

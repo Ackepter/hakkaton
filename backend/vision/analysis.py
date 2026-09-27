@@ -158,8 +158,10 @@ class TrafficSnapshot:
 # ----------------------------------------------------------------------------- analyzer
 
 class TrafficAnalyzer:
-    def __init__(self, zones: Iterable[Zone], ped_priority_threshold: int = 5, tracker: Optional[CentroidTracker] = None):
+    def __init__(self, zones: Iterable[Zone], ped_priority_threshold: int = 5, tracker: Optional[CentroidTracker] = None,
+                 foot_zones: bool = False):
         self.zones = list(zones)
+        self.foot_zones = foot_zones          # perspective cameras: an object belongs to the zone it stands in (ground point)
         self.ped_priority_threshold = ped_priority_threshold
         self.tracker = tracker or CentroidTracker()
         self._entries: Dict[str, Dict[int, float]] = {z.id: {} for z in self.zones}
@@ -173,7 +175,8 @@ class TrafficAnalyzer:
 
     def _zone_for(self, d: Detection) -> Optional[Zone]:
         kind = "pedestrian" if _group(d.cls) == "person" else "lane"
-        return next((z for z in self.zones if z.kind == kind and z.contains(d.x, d.y)), None)
+        x, y = (d.foot or (d.x, d.y + d.h / 2)) if self.foot_zones else (d.x, d.y)
+        return next((z for z in self.zones if z.kind == kind and z.contains(x, y)), None)
 
     def analyze(self, camera_id: str, dets: List[Detection], now: float) -> TrafficSnapshot:
         if self._last_now is not None and now < self._last_now - 1.0:

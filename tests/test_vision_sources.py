@@ -66,7 +66,7 @@ def test_repository_cameras_yaml_is_valid_and_zones_are_well_formed():
     assert os.path.isfile(path)
     cams = load_cameras(path)
     assert [c.id for c in cams] == ["CAM-01"] and cams[0].source == "simulation" and cams[0].detector == "virtual"
-    assert cams[0].timeout_s > 0 and cams[0].width == cams[0].height == 640
+    assert cams[0].timeout_s > 0 and (cams[0].width, cams[0].height) == (640, 480)
 
 
 # ---------------------------------------------------------------- simulation source

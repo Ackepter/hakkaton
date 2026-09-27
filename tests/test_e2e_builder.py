@@ -375,3 +375,151 @@ def test_play_button_applies_pending_changes_and_starts_the_simulation(stack):
     assert wait(lambda: server_layout(si)["traffic"]["spawn_rate"] == 40)
     assert wait(lambda: si.get("/simulation/state").json()["status"] == "running")
     assert wait(lambda: not b.exists("builder-panel"))
+
+
+# ---------------------------------------------------------------------------------- lanes, turns, junction types, cameras
+
+def fresh(si, name="Crossroads"):
+    """Start a test from a known city (the earlier tests leave their own behind)."""
+    r = si.put("/layout", json=si.get("/layout/presets").json()[name])
+    assert r.status_code == 200, r.text
+    si.post("/simulation/stop")
+
+
+def test_more_lanes_grow_the_junction_and_lane_arrows_are_edited(stack):
+    b, si = stack
+    fresh(si)
+    enter_build(b)
+    b.click_testid("tab-roads")
+    b.set_input("arm-east-lanes-in", "3")
+    b.set_input("arm-east-lanes-out", "3")
+    assert wait(lambda: b.exists("arm-east-lane-2"))                     # one row of arrows per inbound lane
+    b.click_testid("arm-east-lane-0-left")
+    b.click_testid("arm-east-lane-0-uturn")
+    b.click_testid("arm-east-lane-2-right")
+    time.sleep(0.8)                                                      # live validation settles
+    b.click_testid("apply")
+    assert wait(lambda: server_layout(si)["arms"]["east"]["lanes_in"] == 3)
+    east = server_layout(si)["arms"]["east"]
+    assert east["lanes_out"] == 3 and len(east["turns"]) == 3
+    assert set(east["turns"][0]) == {"straight", "left", "uturn"} and set(east["turns"][2]) == {"straight", "right"}
+    assert si.get("/geometry").json()["box_half"] == 20                  # the centre grew with the road
+    state = si.get("/simulation/state").json()
+    assert len(state["stages"]) == 3 and ["east"] in state["stages"]      # the arm with turns got its own protected stage
+
+
+def test_a_plain_click_selects_an_object_and_keeps_it_selected(stack):
+    b, si = stack
+    fresh(si)
+    enter_build(b)
+    b.click_testid("tool-place-house")
+    b.click_world(50, -50)
+    b.click_testid("tool-select")
+    px, py = b.project(50, -50, y=2.0)
+    b.mouse("mouseMoved", px, py, 0)
+    time.sleep(0.2)
+    b.mouse("mousePressed", px, py)
+    b.mouse("mouseReleased", px, py)
+    assert wait(lambda: b.exists("inspector"), 5)
+    time.sleep(1.0)
+    assert b.exists("inspector")                                         # the click that ends the pick must not deselect it
+    b.click_world(30, 20)                                                # empty grass
+    assert wait(lambda: not b.exists("inspector"), 5)
+
+
+def test_the_junction_type_catalogue_loads_a_roundabout_and_back(stack):
+    b, si = stack
+    fresh(si)
+    enter_build(b)
+    b.click_testid("tab-layouts")
+    for name in ("Roundabout", "Avenue with U-turn", "Turn crossroads", "Boulevard", "Grand junction"):
+        assert wait(lambda: b.exists(f"preset-{name}")), name
+    b.click_testid("preset-Roundabout")
+    b.click_testid("apply")
+    assert wait(lambda: server_layout(si)["junction"] == "roundabout")
+    g = si.get("/geometry").json()
+    assert g["island"] is not None and len(g["lights"]) == 4 and len(si.get("/simulation/state").json()["lights"]) == 4
+    b.click_testid("tab-roads")
+    assert wait(lambda: b.exists("junction-kind"))
+    assert not b.exists("arm-north-lane-0")                              # no arrows on a roundabout
+    b.set_input("junction-kind", "signal")
+    time.sleep(0.6)
+    b.click_testid("apply")
+    assert wait(lambda: server_layout(si)["junction"] == "signal")
+    assert len(si.get("/simulation/state").json()["lights"]) == 4
+
+
+def test_camera_pose_is_edited_in_the_inspector(stack):
+    b, si = stack
+    fresh(si)
+    enter_build(b)
+    b.click_testid("tool-camera")
+    b.click_world(-34, -34)
+    b.click_testid("tool-select")
+    px, py = b.project(-34, -34, y=4.0)                                  # a click on the mast selects the camera
+    b.mouse("mouseMoved", px, py, 0)
+    time.sleep(0.2)
+    b.mouse("mousePressed", px, py)
+    b.mouse("mouseReleased", px, py)
+    assert wait(lambda: b.exists("insp-fov"), 10)
+    b.set_input("insp-height", "20")
+    b.set_input("insp-fov", "95")
+    b.set_input("insp-radius", "110")
+    b.click_testid("insp-auto-aim")                                      # switch to a manual aim
+    assert wait(lambda: b.exists("insp-yaw"))
+    b.set_input("insp-yaw", "45")
+    b.set_input("insp-pitch", "30")
+    time.sleep(0.6)
+    b.click_testid("apply")
+    assert wait(lambda: len(server_layout(si)["cameras"]) == 1)
+    cam = server_layout(si)["cameras"][0]
+    assert (cam["height_m"], cam["fov_deg"], cam["radius_m"], cam["yaw_deg"], cam["pitch_deg"]) == (20, 95, 110, 45, 30)
+    assert abs(cam["x"] + 34) <= 3 and abs(cam["z"] + 34) <= 3
+    geometry_pose = httpx.get("http://127.0.0.1:8000/api/vision/cameras", trust_env=False).json()
+    assert wait(lambda: any(c["id"] == cam["id"] for c in httpx.get("http://127.0.0.1:8000/api/vision/cameras",
+                                                                  trust_env=False).json()["cameras"]), 15), geometry_pose
+
+
+def test_play_shows_turning_traffic_of_a_new_junction_type(stack):
+    b, si = stack
+    fresh(si, "Turn crossroads")
+    si.post("/simulation/config", json={"spawn_rate": 40, "time_scale": 5})
+    b.goto("http://127.0.0.1:5173/simulation")
+    assert wait(lambda: b.exists("edit-city"), 30)
+    si.post("/simulation/start")
+    seen = set()
+    assert wait(lambda: seen.update(v["movement"] for v in si.get("/simulation/state").json()["vehicles"]) or
+                {"left", "right", "straight"} <= seen, 60, 1.0), seen
+    v = si.get("/simulation/state").json()["vehicles"][0]
+    assert "x" in v and "z" in v and "heading" in v
+    assert b.js("document.querySelector('canvas') !== null")
+
+
+def test_a_roads_ip_field_wires_the_light_to_a_real_signal(stack):
+    b, si = stack
+    fresh(si)
+    enter_build(b)
+    b.click_testid("tab-roads")
+    b.set_input("arm-north-light-ip", "192.168.1.198")
+    b.set_input("arm-north-light-port", "9500")
+    time.sleep(0.6)
+    b.click_testid("apply")
+    assert wait(lambda: server_layout(si)["arms"]["north"]["light_ip"] == "192.168.1.198")
+    north = server_layout(si)["arms"]["north"]
+    assert north["light_port"] == 9500
+    state = si.get("/simulation/state").json()
+    assert any(l["id"] == "TL-N" for l in state["lights"])                # the light itself is unaffected either way
+
+
+def test_sections_and_pedestrian_lights_show_up_in_the_live_metrics_panel(stack):
+    b, si = stack
+    fresh(si, "Turn crossroads")
+    si.post("/simulation/config", json={"spawn_rate": 20, "ped_spawn_rate": 15, "time_scale": 3})
+    b.goto("http://127.0.0.1:5173/simulation")
+    assert wait(lambda: b.exists("edit-city"), 30)
+    si.post("/simulation/start")
+    assert wait(lambda: len(si.get("/simulation/state").json()["lights"][0]["sections"]) > 0, 20)
+    time.sleep(2)
+    text = b.js("document.body.innerText")
+    assert "Pedestrian Lights" in text and ("WALK" in text or "DON" in text)
+    assert b.js("!!document.querySelector('canvas')")

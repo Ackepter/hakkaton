@@ -34,7 +34,7 @@ class MetricsEngine:
             "pedestrians_waiting": 0, "pedestrians_crossing": 0, "avg_wait_s": 0.0, "max_wait_s": 0.0,
             "avg_ped_wait_s": 0.0, "avg_trip_wait_s": 0.0, "throughput_per_min": 0.0, "passed_total": 0,
             "peds_crossed_total": 0, "lane_queues": {}, "congestion_pct": 0.0, "efficiency_pct": 100.0,
-            "phase_switches": 0,
+            "phase_switches": 0, "ped_signal_switches": 0,
         }
 
     def update(
@@ -47,6 +47,7 @@ class MetricsEngine:
         newly_passed: int,
         newly_crossed: int,
         finished_waits: Optional[List[float]] = None,
+        ped_lights: Optional[list] = None,
     ) -> dict:
         self._passed_total += newly_passed
         self._peds_crossed_total += newly_crossed
@@ -96,6 +97,7 @@ class MetricsEngine:
             "congestion_pct": round(congestion, 1),
             "efficiency_pct": round(efficiency, 1),
             "phase_switches": sum(l.phase_switches for l in lights),
+            "ped_signal_switches": sum(c.phase_switches for c in ped_lights or ()),
         }
         self._latest = snapshot
         if sim_time - self._last_sample_time >= HISTORY_INTERVAL_S:

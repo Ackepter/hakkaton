@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 import os
 import logging
 from .dto import (
-    IntersectionData, SimulationInfoDTO, LightDTO, VehicleDTO,
+    IntersectionData, SimulationInfoDTO, LightDTO, PedestrianLightDTO, VehicleDTO,
     PedestrianDTO, MetricsDTO,
 )
 
@@ -102,6 +102,21 @@ class XmlParser:
                     state=el.get("state", "RED"),
                     phase_index=int(el.get("phase_index", 0)),
                     phase_switches=int(el.get("phase_switches", 0)),
+                    sections={s.get("movement", ""): s.get("state", "RED") for s in el.findall("section")},
+                ))
+
+        # <pedestrianLights>
+        pedestrian_lights = []
+        ped_lights_el = root.find("pedestrianLights")
+        if ped_lights_el is not None:
+            for el in ped_lights_el.findall("pedestrianLight"):
+                pedestrian_lights.append(PedestrianLightDTO(
+                    id=el.get("id", ""),
+                    direction=el.get("direction", ""),
+                    state=el.get("state", "RED"),
+                    phase_switches=int(el.get("phase_switches", 0)),
+                    waiting_peds=int(el.get("waiting_peds", 0)),
+                    crossing_peds=int(el.get("crossing_peds", 0)),
                 ))
 
         # <vehicles>
@@ -118,6 +133,11 @@ class XmlParser:
                     speed_mps=float(el.get("speed_mps", 0)),
                     state=el.get("state", "driving"),
                     wait_time=float(el.get("wait_time", 0)),
+                    movement=el.get("movement", "straight"),
+                    lane_index=int(el.get("lane_index", 0)),
+                    x=float(el.get("x")) if el.get("x") is not None else None,
+                    z=float(el.get("z")) if el.get("z") is not None else None,
+                    heading=float(el.get("heading", 0.0)),
                 ))
 
         # <pedestrians>
@@ -133,6 +153,8 @@ class XmlParser:
                     wait_time=float(el.get("wait_time", 0)),
                     direction=int(el.get("direction", 1)),
                     offset=float(el.get("offset", 0.0)),
+                    x=float(el.get("x")) if el.get("x") is not None else None,
+                    z=float(el.get("z")) if el.get("z") is not None else None,
                 ))
 
         # <metrics>
@@ -148,11 +170,13 @@ class XmlParser:
                 throughput_per_min=float(m_el.get("throughput_per_min", 0.0)),
                 congestion_pct=float(m_el.get("congestion_pct", 0.0)),
                 efficiency_pct=float(m_el.get("efficiency_pct", 100.0)),
+                ped_signal_switches=int(m_el.get("ped_signal_switches", 0)),
             )
 
         return IntersectionData(
             simulation=sim_info,
             lights=lights,
+            pedestrian_lights=pedestrian_lights,
             vehicles=vehicles,
             pedestrians=pedestrians,
             metrics=metrics,

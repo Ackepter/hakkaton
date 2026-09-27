@@ -21,6 +21,7 @@ export function parseIntersectionXML(xmlString) {
     timestamp: parseFloat(root.getAttribute('timestamp') || '0'),
     simulation: parseSimulation(root),
     lights: parseLights(root),
+    pedestrianLights: parsePedestrianLights(root),
     vehicles: parseVehicles(root),
     pedestrians: parsePedestrians(root),
     metrics: parseMetrics(root),
@@ -43,12 +44,30 @@ function parseSimulation(root) {
 function parseLights(root) {
   const lights = []
   root.querySelectorAll('trafficLights > light').forEach(el => {
+    const sections = {}
+    el.querySelectorAll('section').forEach(s => { sections[s.getAttribute('movement')] = s.getAttribute('state') })
     lights.push({
       id: el.getAttribute('id'),
       direction: el.getAttribute('direction'),
       state: el.getAttribute('state'),
       phase_index: parseInt(el.getAttribute('phase_index') || '0', 10),
       phase_switches: parseInt(el.getAttribute('phase_switches') || '0', 10),
+      sections,
+    })
+  })
+  return lights
+}
+
+function parsePedestrianLights(root) {
+  const lights = []
+  root.querySelectorAll('pedestrianLights > pedestrianLight').forEach(el => {
+    lights.push({
+      id: el.getAttribute('id'),
+      direction: el.getAttribute('direction'),
+      state: el.getAttribute('state'),
+      phase_switches: parseInt(el.getAttribute('phase_switches') || '0', 10),
+      waiting_peds: parseInt(el.getAttribute('waiting_peds') || '0', 10),
+      crossing_peds: parseInt(el.getAttribute('crossing_peds') || '0', 10),
     })
   })
   return lights
@@ -66,6 +85,11 @@ function parseVehicles(root) {
       speed_mps: parseFloat(el.getAttribute('speed_mps') || '0'),
       state: el.getAttribute('state'),
       wait_time: parseFloat(el.getAttribute('wait_time') || '0'),
+      movement: el.getAttribute('movement') || 'straight',
+      lane_index: parseInt(el.getAttribute('lane_index') || '0', 10),
+      x: el.hasAttribute('x') ? parseFloat(el.getAttribute('x')) : null,
+      z: el.hasAttribute('z') ? parseFloat(el.getAttribute('z')) : null,
+      heading: parseFloat(el.getAttribute('heading') || '0'),
     })
   })
   return vehicles
@@ -82,6 +106,8 @@ function parsePedestrians(root) {
       wait_time: parseFloat(el.getAttribute('wait_time') || '0'),
       direction: parseInt(el.getAttribute('direction') || '1', 10),
       offset: parseFloat(el.getAttribute('offset') || '0'),
+      x: el.hasAttribute('x') ? parseFloat(el.getAttribute('x')) : null,
+      z: el.hasAttribute('z') ? parseFloat(el.getAttribute('z')) : null,
     })
   })
   return peds
@@ -99,5 +125,6 @@ function parseMetrics(root) {
     throughput_per_min: parseFloat(el.getAttribute('throughput_per_min') || '0'),
     congestion_pct: parseFloat(el.getAttribute('congestion_pct') || '0'),
     efficiency_pct: parseFloat(el.getAttribute('efficiency_pct') || '100'),
+    ped_signal_switches: parseInt(el.getAttribute('ped_signal_switches') || '0', 10),
   }
 }

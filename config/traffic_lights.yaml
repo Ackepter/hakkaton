@@ -1,0 +1,18 @@
+# Physical mirror of the virtual traffic lights: each running light (id like TL-N — one per enabled arm, see
+# smart_intersection/engine/world.py) can output its state in parallel to a real LED-matrix signal over UDP, on top
+# of everything shown in the 3D simulation and the Dashboard. Protocol matches task_files/traffic_light.py exactly
+# (one 64x32 RGB frame per datagram); see smart_intersection/hardware/udp_matrix.py.
+#
+# Optional and off by default: a light id left out of this file (or this file itself missing) stays virtual-only —
+# no real hardware is required to run the simulation (Task 34.11: IP addresses are configuration, never hard-coded).
+# The light's own logic never changes for this: the real signal only ever mirrors light.state, decided by the
+# simulation's phase machine — it cannot influence which phase is active.
+
+lights: {}
+
+# ---- example: give TL-N and TL-E their own physical matrix -------------------------------------------------------
+#
+# lights:
+#   TL-N: {ip: 192.168.1.198, port: 9000}
+#   TL-E: {ip: 192.168.1.199, port: 9000}
+#   TL-S: 192.168.1.200                 # port defaults to 9000 if omitted

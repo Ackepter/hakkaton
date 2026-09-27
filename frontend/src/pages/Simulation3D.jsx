@@ -21,11 +21,13 @@ import { ARMS } from '../builder/geometry'
 const WS_URL = `ws://${window.location.hostname}:8001/ws/state`
 const API_URL = `${SI_URL}/simulation/state`
 const LIGHT_COLORS = { RED: '#ef4444', YELLOW: '#fbbf24', GREEN: '#22c55e' }
+const SECTION_GLYPH = { left: '↰', right: '↱', uturn: '↩' }
 const NAV_H = 56
 
 const FALLBACK_LAYOUT = {
-  version: 1, name: 'Crossroads', scenery: [], cameras: [],
-  arms: Object.fromEntries(ARMS.map(a => [a, { enabled: true, length_m: 80, lane_type: 'mixed', speed_limit_mps: 13.9, crossing: true, weight: 1 }])),
+  version: 1, name: 'Crossroads', junction: 'signal', scenery: [], cameras: [],
+  arms: Object.fromEntries(ARMS.map(a => [a, { enabled: true, length_m: 80, lane_type: 'mixed', lanes_in: 1, lanes_out: 1, turns: null,
+                                                speed_limit_mps: 13.9, crossing: true, weight: 1, light_ip: null, light_port: 9000 }])),
   signal: { mode: 'adaptive', base_green: 30, min_green: 8, max_green: 60, yellow: 3, all_red: 3, program: [] },
   traffic: { spawn_rate: 12, ped_spawn_rate: 5, type_probs: { car: 0.75, truck: 0.1, bus: 0.1, tram: 0.04, emergency: 0.01 } },
 }
@@ -33,7 +35,7 @@ const FALLBACK_LAYOUT = {
 const HINTS = {
   select: 'Click an object to select it, drag to move it. Right mouse button rotates the view, wheel zooms.',
   delete: 'Click an object to delete it.',
-  camera: 'Click to place a camera (its dashed square is the area it watches).',
+  camera: 'Click to place a camera; select it to set height, field of view and aim. The dashed area is what it sees.',
 }
 
 export default function Simulation3D() {
@@ -56,6 +58,7 @@ export default function Simulation3D() {
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState([])
   const [presets, setPresets] = useState({})
+  const [junctionTypes, setJunctionTypes] = useState([])
   const d = useLayoutDraft()
   const { draft } = d
 
@@ -110,6 +113,7 @@ export default function Simulation3D() {
   const refreshCities = useCallback(async () => {
     try { setSaved((await layoutApi.list()).saved) } catch {}
     try { setPresets(await layoutApi.presets()) } catch {}
+    try { setJunctionTypes(await layoutApi.junctionTypes()) } catch {}
   }, [])
   useEffect(() => { if (mode === 'build') refreshCities() }, [mode, refreshCities])
 
@@ -206,6 +210,7 @@ export default function Simulation3D() {
   const vehicles = simState?.vehicles ?? []
   const pedestrians = simState?.pedestrians ?? []
   const lights = simState?.lights ?? []
+  const pedestrianLights = simState?.pedestrian_lights ?? []
   const metrics = simState?.metrics ?? null
   const status = simState?.status ?? 'stopped'
   const simTime = simState?.sim_time ?? 0
@@ -221,7 +226,7 @@ export default function Simulation3D() {
                         canUndo={d.canUndo} canRedo={d.canRedo} tool={tool} setTool={setTool} rotation={rotation}
                         setRotation={setRotation} selection={selection} clear={() => setSelection(null)}
                         errors={errors} busy={busy} message={message} onApply={apply} onPlay={play} tab={tab} setTab={setTab}
-                        saved={saved} presets={presets} onSave={save} onLoadSaved={loadSaved}
+                        saved={saved} presets={presets} junctionTypes={junctionTypes} onSave={save} onLoadSaved={loadSaved}
                         onLoadPreset={(n) => useLayout(presets[n], `"${n}"`)} onDeleteSaved={deleteSaved}
                         onDownload={download} onUpload={upload} />
         ) : (
@@ -238,6 +243,7 @@ export default function Simulation3D() {
 
       <main style={{ flex: 1, position: 'relative', minWidth: 0, height: '100%' }}>
         <IntersectionScene layout={layout} vehicles={vehicles} pedestrians={pedestrians} lights={lights}
+                           pedestrianLights={pedestrianLights}
                            cameraStatus={cameraStatus} mode={mode} tool={tool} selection={selection}
                            setSelection={setSelection} actions={draft ? d.actions : null} settle={d.settle}
                            rotation={rotation} onSpawn={onSpawn} />
@@ -274,9 +280,27 @@ export default function Simulation3D() {
           <div style={{ marginBottom: 10 }}>
             <div style={{ color: '#64748b', marginBottom: 4 }}>Traffic Lights</div>
             {lights.map(l => (
-              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, gap: 6 }}>
                 <span style={{ textTransform: 'capitalize', color: '#cbd5e1' }}>{l.direction}</span>
-                <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[l.state] ?? '#888' }}>{l.state}</span>
+                <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {Object.entries(l.sections ?? {}).map(([m, s]) => (
+                    <span key={m} title={`${m} arrow`} style={{ fontFamily: 'monospace', fontSize: 10, color: LIGHT_COLORS[s] ?? '#888' }}>
+                      {SECTION_GLYPH[m] ?? m}
+                    </span>
+                  ))}
+                  <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[l.state] ?? '#888' }}>{l.state}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: '#64748b', marginBottom: 4 }}>Pedestrian Lights</div>
+            {pedestrianLights.map(p => (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                <span style={{ textTransform: 'capitalize', color: '#cbd5e1' }}>{p.direction}</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[p.state] ?? '#888' }}>
+                  {p.state === 'GREEN' ? 'WALK' : 'DON’T WALK'}
+                </span>
               </div>
             ))}
           </div>
@@ -289,6 +313,8 @@ export default function Simulation3D() {
               <MRow label="Avg wait" value={`${(metrics.avg_wait_s ?? 0).toFixed(1)}s`} />
               <MRow label="Efficiency" value={`${(metrics.efficiency_pct ?? 0).toFixed(0)}%`} />
               <MRow label="Congestion" value={`${(metrics.congestion_pct ?? 0).toFixed(0)}%`} />
+              <MRow label="Light switches" value={metrics.phase_switches} />
+              <MRow label="Ped signal switches" value={metrics.ped_signal_switches} />
               <div style={{ color: '#64748b', marginBottom: 4, marginTop: 8 }}>Pedestrians</div>
               <MRow label="Waiting" value={metrics.pedestrians_waiting} />
               <MRow label="Crossing" value={metrics.pedestrians_crossing} />

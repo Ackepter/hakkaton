@@ -18,6 +18,7 @@ export const layoutApi = {
   apply: (layout) => si.put('/layout', layout).then(r => r.data),
   validate: (layout) => si.post('/layout/validate', layout).then(r => r.data),
   presets: () => si.get('/layout/presets').then(r => r.data),
+  junctionTypes: () => si.get('/layout/junction-types').then(r => r.data.types),
   list: () => si.get('/layouts').then(r => r.data),
   save: (layout) => si.post('/layouts', layout).then(r => r.data),
   load: (name) => si.get(`/layouts/${encodeURIComponent(name)}`).then(r => r.data),

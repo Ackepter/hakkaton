@@ -46,6 +46,7 @@ class SpawnManager:
         self._crossing_counts: Dict[str, int] = {}
         self.arm_weights: Dict[str, float] = {}        # per-arm arrival weight (0 = arm missing)
         self.arm_types: Dict[str, Optional[str]] = {}  # per-arm vehicle type (bus lane / tram track)
+        self.arm_paths: Dict[str, Dict[int, list]] = {}   # arm -> inbound lane -> routes (geometry.Path); empty = straight lane 0
 
     def try_spawn_vehicles(self, sim_time: float, dt: float):
         """
@@ -95,26 +96,64 @@ class SpawnManager:
             return None
         return self.make_vehicle(direction, vtype, sim_time)
 
-    def make_vehicle(self, direction: str, vtype: str, sim_time: float):
-        if vtype not in VEHICLE_DEFAULTS:
+    def choose_path(self, direction: str, lane: Optional[int] = None, movement: Optional[str] = None,
+                    size: Optional[tuple] = None):
+        """
+        Pick a route: an inbound lane (equal share per lane), then a movement / exit lane by weight.
+        `size` = (length, width): only routes whose bends the vehicle can drive (a tram cannot u-turn). None = no route.
+        """
+        lanes = self.arm_paths.get(direction)
+        if not lanes:
             return None
-        defaults = VEHICLE_DEFAULTS.get(vtype, VEHICLE_DEFAULTS["car"])
+        fits = lambda p: size is None or p.fits(*size)
+        pool = {i: [p for p in ps if (movement is None or p.movement == movement) and fits(p)] for i, ps in lanes.items()
+                if lane is None or i == lane}
+        pool = {i: ps for i, ps in pool.items() if ps}
+        if not pool:
+            return None
+        keys = sorted(pool)
+        i = keys[0] if len(keys) == 1 else self._rng.choice(keys)      # no random draw when there is nothing to choose
+        ps = pool[i]
+        return self._rng.choices(ps, weights=[p.weight for p in ps])[0] if len(ps) > 1 else ps[0]
+
+    def _new_vehicle(self, vtype: str, direction: str, sim_time: float, path, speed: float) -> Vehicle:
+        d = VEHICLE_DEFAULTS[vtype]
+        size = (d["length_m"], d.get("width_m", 2.0))
         self._vehicle_counter += 1
         return Vehicle(
             id=f"{vtype}-{self._vehicle_counter:04d}",
             vehicle_type=vtype,
-            lane_id=f"{direction}-in",
+            lane_id=path.lane_id if path else f"{direction}-in",
             direction=direction,
+            path_id=path.id if path else "",
+            movement=path.movement if path else "straight",
+            lane_index=path.lane_index if path else 0,
+            exit_arm=path.exit_arm if path else "",
+            seq=self._vehicle_counter,
+            path_len=path.length if path else 0.0,
+            width_m=size[1],
             position_m=0.0,
-            speed_mps=defaults["max_speed"] * 0.8,
-            max_speed=defaults["max_speed"],
-            length_m=defaults["length_m"],
-            accel=defaults["accel"],
-            decel=defaults["decel"],
+            speed_mps=speed,
+            max_speed=d["max_speed"],
+            length_m=d["length_m"],
+            accel=d["accel"],
+            decel=d["decel"],
             state="driving",
             spawn_time=sim_time,
             wait_time=0.0,
         )
+
+    def make_vehicle(self, direction: str, vtype: str, sim_time: float, lane: Optional[int] = None,
+                     movement: Optional[str] = None):
+        if vtype not in VEHICLE_DEFAULTS:
+            return None
+        d = VEHICLE_DEFAULTS[vtype]
+        if self.arm_paths and not self.arm_paths.get(direction):
+            return None
+        path = self.choose_path(direction, lane, movement, (d["length_m"], d.get("width_m", 2.0)))
+        if self.arm_paths and path is None:
+            return None                                    # the requested lane / movement does not exist, or cannot be driven
+        return self._new_vehicle(vtype, direction, sim_time, path, d["max_speed"] * 0.8)
 
     def _weighted_choice(self, probs: Dict[str, float]) -> str:
         keys = list(probs.keys())
@@ -156,21 +195,8 @@ class SpawnManager:
                           spawn_time=sim_time, wait_time=0.0, position_m=-2.5, direction=1 if n % 2 == 0 else -1)
 
     def add_emergency_vehicle(self, sim_time: float, direction: str = "north") -> Vehicle:
-        """Spawn a single emergency vehicle immediately."""
-        defaults = VEHICLE_DEFAULTS["emergency"]
-        self._vehicle_counter += 1
-        return Vehicle(
-            id=f"emergency-{self._vehicle_counter:04d}",
-            vehicle_type="emergency",
-            lane_id=f"{direction}-in",
-            direction=direction,
-            position_m=0.0,
-            speed_mps=defaults["max_speed"],
-            max_speed=defaults["max_speed"],
-            length_m=defaults["length_m"],
-            accel=defaults["accel"],
-            decel=defaults["decel"],
-            state="driving",
-            spawn_time=sim_time,
-            wait_time=0.0,
-        )
+        """Spawn a single emergency vehicle immediately (innermost lane, straight on if possible)."""
+        d = VEHICLE_DEFAULTS["emergency"]
+        size = (d["length_m"], d.get("width_m", 2.0))
+        path = self.choose_path(direction, 0, "straight", size) or self.choose_path(direction, 0, None, size)
+        return self._new_vehicle("emergency", direction, sim_time, path, d["max_speed"])

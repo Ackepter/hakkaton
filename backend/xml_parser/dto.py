@@ -16,6 +16,11 @@ class VehicleDTO:
     speed_mps: float
     state: str
     wait_time: float
+    movement: str = "straight"        # left / straight / right / uturn
+    lane_index: int = 0               # inbound lane, 0 = innermost
+    x: Optional[float] = None         # world position of the centre (metres); None in XML of older services
+    z: Optional[float] = None
+    heading: float = 0.0              # atan2(dz, dx)
 
 
 @dataclass
@@ -27,6 +32,8 @@ class PedestrianDTO:
     wait_time: float
     direction: int = 1
     offset: float = 0.0
+    x: Optional[float] = None
+    z: Optional[float] = None
 
 
 @dataclass
@@ -36,6 +43,17 @@ class LightDTO:
     state: str
     phase_index: int
     phase_switches: int
+    sections: dict = field(default_factory=dict)   # movement -> RED/YELLOW/GREEN; empty for a plain straight-only arm
+
+
+@dataclass
+class PedestrianLightDTO:
+    id: str
+    direction: str
+    state: str
+    phase_switches: int = 0
+    waiting_peds: int = 0
+    crossing_peds: int = 0
 
 
 @dataclass
@@ -48,6 +66,7 @@ class MetricsDTO:
     throughput_per_min: float
     congestion_pct: float
     efficiency_pct: float
+    ped_signal_switches: int = 0
 
 
 @dataclass
@@ -64,6 +83,7 @@ class SimulationInfoDTO:
 class IntersectionData:
     simulation: SimulationInfoDTO
     lights: List[LightDTO] = field(default_factory=list)
+    pedestrian_lights: List[PedestrianLightDTO] = field(default_factory=list)
     vehicles: List[VehicleDTO] = field(default_factory=list)
     pedestrians: List[PedestrianDTO] = field(default_factory=list)
     metrics: Optional[MetricsDTO] = None

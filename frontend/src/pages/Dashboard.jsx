@@ -8,6 +8,7 @@ import {
 } from 'recharts'
 
 const LIGHT_COLORS = { RED: '#fc8181', YELLOW: '#f6e05e', GREEN: '#68d391', FLASHING_YELLOW: '#f6e05e', OFF: '#4a5568' }
+const SECTION_GLYPH = { left: '↰', right: '↱', uturn: '↩' }
 const MODE_COLORS = { AUTO: '#68d391', MANUAL: '#63b3ed', FAILSAFE: '#fc8181' }
 const CONGESTION_COLORS = { CLEAR: '#68d391', MODERATE: '#f6e05e', CONGESTED: '#ed8936', GRIDLOCK: '#fc8181' }
 
@@ -64,6 +65,7 @@ export default function Dashboard() {
   const [lights, setLights] = useState([])
   const [simRunning, setSimRunning] = useState(false)
   const [siLights, setSiLights] = useState([])
+  const [siPedLights, setSiPedLights] = useState([])
 
   // Smart Intersection lights (XML -> backend parser -> JSON). Shown when the backend controller has none.
   useEffect(() => {
@@ -71,9 +73,12 @@ export default function Dashboard() {
     const load = async () => {
       try {
         const r = await api.get('/api/si/state')
-        if (alive) setSiLights((r.data.lights || []).map(l => ({ ...l, time_remaining: 0, from_si: true })))
+        if (alive) {
+          setSiLights((r.data.lights || []).map(l => ({ ...l, time_remaining: 0, from_si: true })))
+          setSiPedLights(r.data.pedestrian_lights || [])
+        }
       } catch {
-        if (alive) setSiLights([])
+        if (alive) { setSiLights([]); setSiPedLights([]) }
       }
     }
     load()
@@ -196,6 +201,13 @@ export default function Dashboard() {
                   <div style={{ fontSize: 11, color: '#718096' }}>
                     {light.from_si ? `переключений: ${light.phase_switches}` : `Осталось: ${Math.round(light.time_remaining)}с`}
                   </div>
+                  {light.sections && Object.keys(light.sections).length > 0 && (
+                    <div style={{ fontSize: 11, marginTop: 2, display: 'flex', gap: 8 }}>
+                      {Object.entries(light.sections).map(([m, st]) => (
+                        <span key={m} style={{ color: LIGHT_COLORS[st] }}>{SECTION_GLYPH[m] ?? m} {st}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <div style={{
@@ -216,6 +228,30 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
+
+        {/* Pedestrian lights panel */}
+        {siPedLights.length > 0 && (
+          <div style={{ ...s.card, minWidth: 220, flex: '0 0 auto' }}>
+            <div style={s.cardTitle}>🚶 Пешеходные светофоры</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {siPedLights.map(p => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                                          background: '#131722', borderRadius: 8, padding: '8px 12px' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#e2e8f0' }}>{p.id}</div>
+                    <div style={{ fontSize: 11, color: '#718096' }}>
+                      переключений: {p.phase_switches} · ждут: {p.waiting_peds} · переходят: {p.crossing_peds}
+                    </div>
+                  </div>
+                  <div style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+                                background: LIGHT_COLORS[p.state] + '22', color: LIGHT_COLORS[p.state] }}>
+                    {p.state === 'GREEN' ? 'ИДИТЕ' : 'СТОЙТЕ'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Stats */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>

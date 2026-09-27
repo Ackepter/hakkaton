@@ -3,7 +3,7 @@
  * It only edits the draft through `actions`; the simulation changes when the layout is applied.
  */
 import { useRef, useState } from 'react'
-import { ARMS, SCENE_TYPES } from '../../builder/geometry'
+import { ARMS, MAX_LANES, SCENE_TYPES, boxHalf, cameraAim, laneTurns, lanesIn, lanesOut, minArmLength } from '../../builder/geometry'
 import { Btn, C, Errors, NumberInput, Row, Section, Select, Slider, Tabs, Toggle } from './ui'
 import SignalEditor from './SignalEditor'
 
@@ -25,7 +25,24 @@ function Inspector({ draft, selection, actions, clear }) {
       <Row label="Position Z"><NumberInput value={Math.round(o.z)} min={-150} max={150} onChange={v => set({ z: v })} testid="insp-z" /></Row>
       {isCam ? (
         <>
-          <Row label="View radius"><Slider value={o.radius_m} min={20} max={70} unit=" m" onChange={v => set({ radius_m: v })} testid="insp-radius" /></Row>
+          <Row label="Mast height"><Slider value={o.height_m ?? 12} min={3} max={40} unit=" m" onChange={v => set({ height_m: v })} testid="insp-height" /></Row>
+          <Row label="Field of view"><Slider value={o.fov_deg ?? 70} min={20} max={120} unit="°" onChange={v => set({ fov_deg: v })} testid="insp-fov" /></Row>
+          <Row label="Range"><Slider value={o.radius_m} min={20} max={120} unit=" m" onChange={v => set({ radius_m: v })} testid="insp-radius" /></Row>
+          <Row label="Aim">
+            <Toggle checked={o.yaw_deg == null && o.pitch_deg == null} label="at the junction"
+                    testid="insp-auto-aim" onChange={auto => set(auto ? { yaw_deg: null, pitch_deg: null }
+                      : { yaw_deg: Math.round(cameraAim(o)[0]), pitch_deg: Math.round(cameraAim(o)[1]) })} />
+          </Row>
+          {(o.yaw_deg != null || o.pitch_deg != null) && (
+            <>
+              <Row label="Heading"><Slider value={o.yaw_deg ?? cameraAim(o)[0]} min={0} max={359} unit="°" onChange={v => set({ yaw_deg: v, pitch_deg: o.pitch_deg ?? cameraAim(o)[1] })} testid="insp-yaw" /></Row>
+              <Row label="Tilt down"><Slider value={o.pitch_deg ?? cameraAim(o)[1]} min={5} max={90} unit="°" onChange={v => set({ pitch_deg: v, yaw_deg: o.yaw_deg ?? cameraAim(o)[0] })} testid="insp-pitch" /></Row>
+            </>
+          )}
+          <div style={{ fontSize: 11, color: C.faint, marginBottom: 6 }}>
+            The camera sees a perspective picture limited by its field of view; the dashed area on the ground is what it covers.
+            Heading 0° = north, 90° = east.
+          </div>
           <Row label="Enabled"><Toggle checked={o.enabled} onChange={v => set({ enabled: v })} label="camera is on" /></Row>
         </>
       ) : (
@@ -66,9 +83,50 @@ function ObjectsTab({ draft, tool, setTool, rotation, setRotation, selection, ac
   )
 }
 
+const MOVE_LABEL = { left: 'L', straight: '↑', right: 'R', uturn: 'U' }
+const MOVE_TITLE = { left: 'left turn', straight: 'straight on', right: 'right turn', uturn: 'U-turn' }
+
+function LaneTurns({ arm, a, actions, roundabout }) {
+  if (roundabout) return null
+  const turns = laneTurns(a)
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 11, color: C.dim, marginBottom: 3 }}>Lane movements (lane 1 = next to the centre line)</div>
+      {turns.map((moves, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }} data-testid={`arm-${arm}-lane-${i}`}>
+          <span style={{ width: 44, fontSize: 11, color: C.faint }}>Lane {i + 1}</span>
+          {['left', 'straight', 'right', 'uturn'].map(m => {
+            const on = moves.includes(m)
+            return (
+              <button key={m} title={MOVE_TITLE[m]} data-testid={`arm-${arm}-lane-${i}-${m}`}
+                      onClick={() => actions.setLaneTurns(arm, i, on ? moves.filter(x => x !== m) : [...moves, m])}
+                      style={{ width: 28, height: 24, borderRadius: 5, border: `1px solid ${on ? C.accent : C.line}`, cursor: 'pointer',
+                               background: on ? '#0c4a6e' : C.bg, color: on ? '#e0f2fe' : C.faint, fontWeight: 700, fontSize: 12 }}>
+                {MOVE_LABEL[m]}
+              </button>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function RoadsTab({ draft, actions }) {
+  const round = draft.junction === 'roundabout'
+  const maxLanes = round ? 2 : MAX_LANES
   return (
     <>
+      <Section title="Junction">
+        <Row label="Control">
+          <Select value={draft.junction ?? 'signal'} testid="junction-kind" onChange={v => actions.setJunction(v)}
+                  options={[{ value: 'signal', label: 'Traffic lights' }, { value: 'roundabout', label: 'Roundabout' }]} />
+        </Row>
+        <div style={{ fontSize: 11, color: C.faint }}>
+          Centre of the junction: {boxHalf(draft) * 2} × {boxHalf(draft) * 2} m — it grows with the widest road.
+          {round ? ' Every entry still has its own light (see the Signals tab); a car with green still gives way to traffic already on the ring, and may exit anywhere.' : ''}
+        </div>
+      </Section>
       {ARMS.map(arm => {
         const a = draft.arms[arm]
         return (
@@ -82,7 +140,12 @@ function RoadsTab({ draft, actions }) {
             </div>
             {a.enabled && (
               <>
-                <Row label="Length"><Slider value={a.length_m} min={30} max={80} unit=" m" onChange={v => actions.updateArm(arm, { length_m: v })}
+                <Row label="Lanes in"><Slider value={lanesIn(a)} min={1} max={maxLanes} unit="" onChange={v => actions.updateArm(arm, { lanes_in: v })}
+                                               testid={`arm-${arm}-lanes-in`} /></Row>
+                <Row label="Lanes out"><Slider value={lanesOut(a)} min={1} max={maxLanes} unit="" onChange={v => actions.updateArm(arm, { lanes_out: v })}
+                                                testid={`arm-${arm}-lanes-out`} /></Row>
+                <LaneTurns arm={arm} a={a} actions={actions} roundabout={round} />
+                <Row label="Length"><Slider value={a.length_m} min={Math.ceil(minArmLength(draft))} max={80} unit=" m" onChange={v => actions.updateArm(arm, { length_m: v })}
                                             testid={`arm-${arm}-length`} /></Row>
                 <Row label="Lane type">
                   <Select value={a.lane_type} testid={`arm-${arm}-lane`} onChange={v => actions.updateArm(arm, { lane_type: v })}
@@ -92,15 +155,28 @@ function RoadsTab({ draft, actions }) {
                                                   onChange={v => actions.updateArm(arm, { speed_limit_mps: v / 3.6 })} /></Row>
                 <Row label="Traffic share"><Slider value={a.weight} min={0} max={5} step={0.5} digits={1} unit="×"
                                                     onChange={v => actions.updateArm(arm, { weight: v })} /></Row>
-                <Row label="Crosswalk"><Toggle checked={a.crossing} onChange={v => actions.updateArm(arm, { crossing: v })}
-                                                label="pedestrian crossing" testid={`arm-${arm}-crossing`} /></Row>
+                {!round && (
+                  <Row label="Crosswalk"><Toggle checked={a.crossing} onChange={v => actions.updateArm(arm, { crossing: v })}
+                                                  label="pedestrian crossing" testid={`arm-${arm}-crossing`} /></Row>
+                )}
+                <Row label="Real light" hint="Mirror this light's state to a physical LED-matrix signal over UDP (task_files/traffic_light.py protocol). Leave the IP blank to keep it virtual-only.">
+                  <input value={a.light_ip ?? ''} placeholder="e.g. 192.168.1.198" data-testid={`arm-${arm}-light-ip`}
+                         onChange={e => actions.updateArm(arm, { light_ip: e.target.value })}
+                         style={{ flex: 1, minWidth: 0, background: C.bg, color: C.text, border: `1px solid ${C.line}`,
+                                  borderRadius: 4, padding: '3px 6px', fontSize: 12 }} />
+                  <span style={{ color: C.faint, fontSize: 11 }}>:</span>
+                  <NumberInput value={a.light_port ?? 9000} min={1} max={65535} width={64}
+                               onChange={v => actions.updateArm(arm, { light_port: v })} testid={`arm-${arm}-light-port`} />
+                </Row>
               </>
             )}
           </div>
         )
       })}
       <div style={{ fontSize: 11, color: C.faint }}>
-        Cars drive straight through. A missing opposite road becomes a dead end with a barrier.
+        Each inbound lane goes where its arrows say. A straight ride into a missing road ends at a barrier. A road with left
+        turns or U-turns gets its own protected green; trams and long trucks cannot U-turn. A road's "Real light" IP sends its
+        signal, in parallel, to an actual LED-matrix traffic light — optional, off by default.
       </div>
     </>
   )
@@ -134,7 +210,7 @@ function TrafficTab({ draft, actions }) {
   )
 }
 
-function LayoutsTab({ draft, actions, saved, presets, onSave, onLoadSaved, onLoadPreset, onDeleteSaved, onDownload, onUpload }) {
+function LayoutsTab({ draft, actions, saved, presets, junctionTypes, onSave, onLoadSaved, onLoadPreset, onDeleteSaved, onDownload, onUpload }) {
   const file = useRef(null)
   const [name, setName] = useState(draft.name)
   const valid = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$/.test(name)
@@ -164,10 +240,13 @@ function LayoutsTab({ draft, actions, saved, presets, onSave, onLoadSaved, onLoa
           </div>
         ))}
       </Section>
-      <Section title="Ready-made layouts">
-        {Object.keys(presets).map(n => (
-          <Btn key={n} small onClick={() => onLoadPreset(n)} style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 4 }}
-               testid={`preset-${n}`}>🏙 {n}</Btn>
+      <Section title="Junction types">
+        {(junctionTypes?.length ? junctionTypes : Object.keys(presets).map(name => ({ name, description: '' }))).filter(t => presets[t.name]).map(t => (
+          <div key={t.name} style={{ marginBottom: 6 }}>
+            <Btn small onClick={() => onLoadPreset(t.name)} style={{ display: 'block', width: '100%', textAlign: 'left' }}
+                 testid={`preset-${t.name}`}>{t.junction === 'roundabout' ? '🔄' : '🏙'} {t.name}</Btn>
+            {t.description && <div style={{ fontSize: 10.5, color: C.faint, padding: '2px 4px' }}>{t.description}</div>}
+          </div>
         ))}
       </Section>
     </>
@@ -198,7 +277,7 @@ export default function BuilderPanel(props) {
         { id: 'traffic', label: 'Traffic' }, { id: 'layouts', label: 'Cities' }]} />
       {tab === 'objects' && <ObjectsTab {...props} />}
       {tab === 'roads' && <RoadsTab {...props} />}
-      {tab === 'signals' && <SignalEditor signal={draft.signal} actions={props.actions} />}
+      {tab === 'signals' && <SignalEditor signal={draft.signal} actions={props.actions} layout={draft} />}
       {tab === 'traffic' && <TrafficTab {...props} />}
       {tab === 'layouts' && <LayoutsTab {...props} />}
     </div>

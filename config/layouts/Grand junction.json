@@ -1,60 +1,124 @@
 {
   "version": 1,
-  "name": "Crossroads",
+  "name": "Grand junction",
   "junction": "signal",
   "arms": {
     "north": {
       "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 1,
-      "lanes_out": 1,
+      "lanes_in": 4,
+      "lanes_out": 4,
       "turns": [
         [
-          "left"
+          "left",
+          "uturn"
+        ],
+        [
+          "straight"
+        ],
+        [
+          "straight"
+        ],
+        [
+          "straight",
+          "right"
         ]
       ],
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "south": {
       "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 1,
-      "lanes_out": 1,
-      "turns": null,
+      "lanes_in": 4,
+      "lanes_out": 4,
+      "turns": [
+        [
+          "left",
+          "uturn"
+        ],
+        [
+          "straight"
+        ],
+        [
+          "straight"
+        ],
+        [
+          "straight",
+          "right"
+        ]
+      ],
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "east": {
       "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 1,
-      "lanes_out": 1,
-      "turns": null,
+      "lanes_in": 4,
+      "lanes_out": 4,
+      "turns": [
+        [
+          "left",
+          "uturn"
+        ],
+        [
+          "straight"
+        ],
+        [
+          "straight"
+        ],
+        [
+          "straight",
+          "right"
+        ]
+      ],
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "west": {
       "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 1,
-      "lanes_out": 1,
-      "turns": null,
+      "lanes_in": 4,
+      "lanes_out": 4,
+      "turns": [
+        [
+          "left",
+          "uturn"
+        ],
+        [
+          "straight"
+        ],
+        [
+          "straight"
+        ],
+        [
+          "straight",
+          "right"
+        ]
+      ],
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     }
   },
   "signal": {
     "mode": "adaptive",
-    "base_green": 30.0,
+    "base_green": 25.0,
     "min_green": 8.0,
     "max_green": 60.0,
     "yellow": 3.0,
@@ -105,7 +169,7 @@
     ]
   },
   "traffic": {
-    "spawn_rate": 12.0,
+    "spawn_rate": 48.0,
     "ped_spawn_rate": 5.0,
     "type_probs": {
       "car": 0.75,
@@ -235,126 +299,6 @@
       "scale": 1.4,
       "height": 23.0,
       "color": "#af706a"
-    },
-    {
-      "id": "t1",
-      "type": "tree",
-      "x": -22.0,
-      "z": -22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t2",
-      "type": "tree",
-      "x": 22.0,
-      "z": -22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t3",
-      "type": "tree",
-      "x": -22.0,
-      "z": 22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t4",
-      "type": "tree",
-      "x": 22.0,
-      "z": 22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t5",
-      "type": "tree",
-      "x": -22.0,
-      "z": -5.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t6",
-      "type": "tree",
-      "x": -22.0,
-      "z": 5.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t7",
-      "type": "tree",
-      "x": 22.0,
-      "z": -5.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t8",
-      "type": "tree",
-      "x": 22.0,
-      "z": 5.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t9",
-      "type": "tree",
-      "x": -5.0,
-      "z": -22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t10",
-      "type": "tree",
-      "x": 5.0,
-      "z": -22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t11",
-      "type": "tree",
-      "x": -5.0,
-      "z": 22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t12",
-      "type": "tree",
-      "x": 5.0,
-      "z": 22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
     }
   ],
   "cameras": []

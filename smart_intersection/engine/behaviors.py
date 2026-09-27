@@ -19,6 +19,8 @@ STOP_TOLERANCE_M = 0.3
 BRAKE_FACTOR = 0.8       # planned braking as a fraction of max decel (leaves a safety margin)
 CAN_STOP_FACTOR = 0.95   # vehicle may still stop if required decel <= this * max decel
 PASSING_ZONE_M = 42.0    # length of the box + crosswalks after the stop line, for the "passing" label
+YIELD_HOLD_M = MIN_GAP_M + 1.0     # a stopped vehicle this close to an obstacle counts as waiting (yield_rule)
+YIELD_RELEASE_M = MIN_GAP_M + 2.5  # ... and starts again once the obstacle is this far
 
 
 def update_vehicle(
@@ -27,8 +29,18 @@ def update_vehicle(
     lane: Lane,
     light_state: str,
     vehicles_ahead: List[Vehicle],
+    path=None,
+    extra_gap: Optional[float] = None,
+    yield_rule: bool = False,
 ) -> Optional[str]:
-    """Advance one vehicle by dt. Returns 'finished' when it has left the map."""
+    """
+    Advance one vehicle by dt. Returns 'finished' when it has left the map.
+
+    path       the route (geometry.Path): bends limit the speed, its length ends the trip
+    extra_gap  distance to something that is not a leader in the lane but blocks the way (reserved conflict cells, a
+               vehicle about to merge, pedestrians on the exit crosswalk); treated like a stopped leader
+    yield_rule mark vehicles held by such obstacles as waiting (accumulate wait time) instead of leaving them 'driving'
+    """
     if vehicle.state == "finished":
         return "finished"
 
@@ -38,7 +50,29 @@ def update_vehicle(
     before_line = inbound and dist > -0.5
     stop_light = light_state in ("RED", "YELLOW")
     lead_gap = _lead_gap(vehicle, vehicles_ahead)
+    if extra_gap is not None:
+        lead_gap = extra_gap if lead_gap is None else min(lead_gap, extra_gap)
     approaching_stop = before_line and stop_light and dist < APPROACH_DIST_M
+    end = path.length if path is not None else lane.length_m
+    passing_zone = path.passing_len if path is not None else PASSING_ZONE_M
+
+    # ---------- held by a merge / crossing / leader (not a red light): wait, then go ----------
+    if approaching_stop:
+        vehicle.yielding = False                       # the red light takes over
+    elif yield_rule:
+        if vehicle.yielding:
+            if lead_gap is None or lead_gap > YIELD_RELEASE_M:
+                vehicle.yielding = False
+                vehicle.state = "driving"
+            else:
+                vehicle.wait_time += dt
+                vehicle.speed_mps = 0.0
+                return None
+        elif vehicle.speed_mps < 0.3 and lead_gap is not None and lead_gap < YIELD_HOLD_M and vehicle.state != "waiting":
+            vehicle.yielding = True
+            vehicle.state = "waiting"
+            vehicle.speed_mps = 0.0
+            return None
 
     # ---------- FSM transitions ----------
     if vehicle.state == "waiting":
@@ -63,9 +97,9 @@ def update_vehicle(
             vehicle.state = "driving"
 
     if inbound:
-        if vehicle.state == "driving" and -PASSING_ZONE_M < dist <= 0:
+        if vehicle.state == "driving" and -passing_zone < dist <= 0:
             vehicle.state = "passing"
-        elif vehicle.state == "passing" and dist <= -PASSING_ZONE_M:
+        elif vehicle.state == "passing" and dist <= -passing_zone:
             vehicle.state = "driving"
 
     # ---------- speed ----------
@@ -77,11 +111,16 @@ def update_vehicle(
             target = 0.0
         else:
             target = min(target, math.sqrt(2 * BRAKE_FACTOR * vehicle.decel * max(dist - 0.2, 0.0)))
+    if path is not None and path.speed_cap < target:               # slow down for the bend, before it starts
+        to_bend = path.box_entry_s - (vehicle.position_m + half)
+        if vehicle.position_m - half < path.box_exit_s:
+            cap = path.speed_cap if to_bend <= 0 else math.sqrt(path.speed_cap ** 2 + 2 * BRAKE_FACTOR * vehicle.decel * to_bend)
+            target = min(target, cap)
     _apply_acceleration(vehicle, target, dt)
 
     vehicle.position_m += vehicle.speed_mps * dt
 
-    if vehicle.position_m - half >= lane.length_m:
+    if vehicle.position_m - half >= end:
         vehicle.state = "finished"
         vehicle.passed_intersection = True
         return "finished"
