@@ -612,8 +612,12 @@ class SimulationEngine:
                   if q.crossing_id == p.crossing_id and q.direction == p.direction
                   and q.state in ("walking_to_crossing", "waiting_for_green")]
         offset = min(PED_LANES[p.direction], key=lambda o: sum(1 for q in queued if q.offset == o))
+        occupied = {round(-q.stand_position / PED_QUEUE_SPACING_M) for q in queued if q.offset == offset}
+        slot = 0
+        while slot in occupied:
+            slot += 1
         p.offset = offset
-        p.stand_position = -PED_QUEUE_SPACING_M * sum(1 for q in queued if q.offset == offset)
+        p.stand_position = -PED_QUEUE_SPACING_M * slot
         p.position_m = p.stand_position - 2.5
         p.crossing_width = self._crossings[p.crossing_id].geo["width"]
         self._sync_ped_xy(p)

@@ -43,7 +43,7 @@ def test_03_heavy_traffic_moves_more_vehicles_and_builds_queues():
 def test_04_pedestrian_rush_moves_many_pedestrians_without_blocking_cars():
     m = run(make_engine("pedestrian_rush"), 300)
     assert m["peds_crossed_total"] >= 100
-    assert m["passed_total"] >= 15                 # cars still get through
+    assert m["passed_total"] >= 5                  # the low-rate car stream still gets through
 
 
 def test_05_unbalanced_north_dominates_arrivals_and_stays_stable():
@@ -117,6 +117,29 @@ def test_10_all_presets_are_complete_and_isolated_copies():
     a = get_scenario("normal")
     a["direction_probs"]["north"] = 99
     assert get_scenario("normal")["direction_probs"]["north"] == 0.25      # deep copy
+
+
+def test_pedestrian_rush_is_pedestrian_heavy_and_uses_only_cars():
+    cfg = get_scenario("pedestrian_rush")
+    assert cfg["ped_spawn_rate"] == 60.0
+    assert cfg["spawn_rate"] == 3.0
+    assert cfg["type_probs"] == {"car": 1.0, "truck": 0.0, "bus": 0.0, "tram": 0.0, "emergency": 0.0}
+
+
+def test_pedestrian_queue_fills_the_first_free_slot_without_stacking():
+    from smart_intersection.engine.models import Pedestrian
+
+    e = make_engine("empty")
+    for offset, positions in ((-1.2, (-0.5, -1.0)), (-0.75, (0.0, -0.5)), (-0.3, (0.0, -0.5))):
+        for i, stand in enumerate(positions):
+            p = Pedestrian(f"queued-{offset}-{i}", "PC-N", "waiting_for_green", 0.0, 0.0,
+                           direction=1, offset=offset, stand_position=stand)
+            e._pedestrians[p.id] = p
+    incoming = Pedestrian("incoming", "PC-N", "walking_to_crossing", 0.0, 0.0, direction=1)
+
+    e._assign_ped_slot(incoming)
+
+    assert (incoming.offset, incoming.stand_position) == (-1.2, 0.0)
 
 
 def test_11_unknown_scenario_raises_key_error():

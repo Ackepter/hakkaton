@@ -33,12 +33,12 @@ SCENARIOS = {
     },
     "pedestrian_rush": {
         "name": "Pedestrian Rush Hour",
-        "description": "Many pedestrians, moderate vehicle traffic",
-        "spawn_rate": 8.0,
-        "ped_spawn_rate": 30.0,
+        "description": "Very high pedestrian flow, few cars",
+        "spawn_rate": 3.0,
+        "ped_spawn_rate": 60.0,
         "time_scale": 1.0,
         "direction_probs": {"north": 0.25, "south": 0.25, "east": 0.25, "west": 0.25},
-        "type_probs": {"car": 0.75, "truck": 0.10, "bus": 0.10, "tram": 0.04, "emergency": 0.01},
+        "type_probs": {"car": 1.0, "truck": 0.0, "bus": 0.0, "tram": 0.0, "emergency": 0.0},
     },
     "unbalanced": {
         "name": "Unbalanced North Flow",

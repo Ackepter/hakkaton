@@ -101,8 +101,8 @@ export default function SimControls({ simStatus, metrics, cameraFailure = false,
           onChange={e => { setControlMode(e.target.value); call('post', '/simulation/config', { control_mode: e.target.value }) }}
           style={{ width: '100%', background: '#1e293b', color: '#fff', border: '1px solid #334155', borderRadius: 4, padding: '4px 6px', fontSize: 12 }}
         >
-          <option value="auto">Adaptive (AUTO)</option>
-          <option value="failsafe">Fixed timing (FAILSAFE)</option>
+          <option value="auto">Camera analysis (AUTO)</option>
+          <option value="failsafe">Timer (fixed timing)</option>
         </select>
       </div>
 
