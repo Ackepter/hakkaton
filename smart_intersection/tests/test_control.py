@@ -4,6 +4,7 @@ import pytest
 from smart_intersection.engine.simulation import (
     SimulationEngine, PHASES, YELLOW_S, ALL_RED_S, MAX_ALL_RED_S, BASE_GREEN, MIN_GREEN, FAILSAFE_GREEN, MAX_GREEN,
 )
+from smart_intersection.layout import default_layout
 from .helpers import make_engine, check_invariants
 
 
@@ -64,9 +65,11 @@ def test_failsafe_uses_fixed_twenty_second_greens():
 def test_auto_mode_extends_green_when_cross_street_is_empty():
     e = make_engine("normal", spawn_rate=20.0, ped_spawn_rate=0.0,
                     direction_probs={"north": 0.5, "south": 0.5, "east": 0.0, "west": 0.0})
-    log = phase_log(e, 200)
-    # nobody waits on east/west, so NS green is never cut short: no phase change until MAX_GREEN
-    assert log[0] == (0, pytest.approx(MAX_GREEN, abs=0.2))
+    for _ in range(2000):
+        e.set_perception({"camera_ok": True, "vehicles": {"north": 5, "south": 4, "east": 0, "west": 0}})
+        e._tick(0.1)
+    assert e._phase_index == 0
+    assert all(light.phase_switches == 0 for light in e._lights.values())
 
 
 def test_auto_mode_switches_early_when_current_group_is_idle():
@@ -284,7 +287,7 @@ def _first_green_length(e, max_s=70):
 
 
 def test_crowd_of_pedestrians_cuts_the_conflicting_green_short():
-    """North/south cars keep NS green until MAX; a crowd waiting on PC-N (served by EW green) ends it at MIN_GREEN."""
+    """Local simulation keeps its timer plan; a crowd on the opposing stage earns priority."""
     kw = dict(spawn_rate=30.0, ped_spawn_rate=0.0, direction_probs={"north": 0.5, "south": 0.5, "east": 0.0, "west": 0.0})
     calm = make_engine("normal", **kw)
     assert _first_green_length(calm) == pytest.approx(MAX_GREEN, abs=0.3)
@@ -294,9 +297,9 @@ def test_crowd_of_pedestrians_cuts_the_conflicting_green_short():
 
 
 def test_a_small_group_of_pedestrians_does_not_trigger_priority():
-    e = make_engine("normal", spawn_rate=30.0, ped_spawn_rate=0.0,
-                    direction_probs={"north": 0.5, "south": 0.5, "east": 0.0, "west": 0.0})
+    e = make_engine("normal", spawn_rate=0.0, ped_spawn_rate=0.0)
     _crowd(e, n=2)
+    e.set_perception({"camera_ok": True, "vehicles": {"north": 3}, "pedestrians_waiting": {"PC-N": 2}})
     assert _first_green_length(e) > MIN_GREEN + 5
 
 
@@ -321,11 +324,38 @@ def test_camera_priority_is_exposed_for_the_live_screen_and_falls_back_without_c
         "camera_ok": True, "recipient": "pedestrians", "vehicles": 1, "pedestrians": 8,
     }
 
-    e.set_perception({"camera_ok": True, "vehicles": {"east": 3}, "pedestrians_waiting": {"PC-N": 2},
-                      "ped_priority": {"PC-N": False}})
+    e.set_perception({"camera_ok": True, "vehicles": {"east": 8}, "pedestrians_waiting": {"PC-N": 5},
+                      "ped_priority": {"PC-N": True}})
     assert e.get_state()["camera_priority"]["recipient"] == "drivers"
+    assert e._ped_priority(next(s for s in range(len(e._stages)) if e._serves(s, "PC-N"))) is False
 
     e.set_perception({"camera_ok": False})
     assert e.get_state()["camera_priority"] == {
         "camera_ok": False, "recipient": None, "vehicles": 0, "pedestrians": 0,
     }
+
+
+def test_camera_mode_holds_green_when_perpendicular_approach_is_empty():
+    e = idle()
+    for _ in range(1200):
+        e.set_perception({"camera_ok": True, "vehicles": {"north": 1}})
+        e._tick(0.1)
+
+    assert e._phase_index == 0
+    assert all(light.phase_switches == 0 for light in e._lights.values())
+
+
+def test_pedestrian_crosses_a_single_arm_layout_instead_of_waiting_forever():
+    layout = default_layout()
+    for arm in ("south", "east", "west"):
+        layout.arms[arm].enabled = False
+    layout.arms["north"].lanes_out = 2
+    layout.arms["north"].turns = [["uturn"]]
+    e = SimulationEngine(seed=42, layout=layout)
+    e.configure(spawn_rate=0.0, ped_spawn_rate=0.0)
+    ped = e.spawn_pedestrian("PC-N")
+
+    e.advance(60)
+
+    assert ped.crossing_id == "PC-N"
+    assert e.get_state()["metrics"]["peds_crossed_total"] == 1

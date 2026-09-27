@@ -344,7 +344,7 @@ def test_same_seed_gives_identical_runs_and_different_seed_differs():
 
 def test_advance_moves_time_and_cycles_phases():
     e = SimulationEngine(seed=42)
-    e.configure(spawn_rate=0.0, ped_spawn_rate=0.0)
+    e.configure(spawn_rate=80.0, ped_spawn_rate=0.0)
     seen = set()
     for _ in range(1300):
         e.advance(0.1)

@@ -310,7 +310,8 @@ export default function Simulation3D() {
             <div style={{ color: cameraPriority?.camera_ok ? '#e2e8f0' : '#fbbf24', fontWeight: 600 }}>
               {!cameraPriority?.camera_ok ? 'Таймерный режим · камера недоступна'
                 : cameraPriority.recipient === 'pedestrians' ? '🚶 Пешеходам'
-                  : cameraPriority.recipient === 'drivers' ? '🚗 Водителям' : 'Очередей нет'}
+                  : cameraPriority.recipient === 'drivers' ? '🚗 Водителям'
+                    : cameraPriority.recipient === 'balanced' ? 'Поровну · обычный режим' : 'Очередей нет'}
             </div>
             {cameraPriority?.camera_ok && (
               <div style={{ color: '#94a3b8', marginTop: 2 }}>

@@ -40,7 +40,6 @@ EMERGENCY_MIN_GREEN = 5.0
 EMERGENCY_LOOKAHEAD_M = 60.0
 DEMAND_LOOKAHEAD_M = 40.0
 PED_MARGIN_S = 1.0
-PED_PRIORITY_THRESHOLD = 5        # waiting pedestrians on one crosswalk that earn their phase priority (ground truth)
 PED_LANES = {1: (-1.2, -0.75, -0.3), -1: (0.3, 0.75, 1.2)}   # opposite directions never share a lateral lane
 PED_QUEUE_SPACING_M = 0.5
 MAX_SUBSTEP = 0.1
@@ -109,6 +108,7 @@ class SimulationEngine:
         self._split: Dict[tuple, int] = {}
         self._stages = layout_stages(self.layout)
         self._crossing_stages = crossing_stages(self.layout)
+        self._orphan_crossings = {cid for cid in self._crossings if not self._crossing_stages.get(cid)}
         self._blockers = {cid: [a for a in self.layout.enabled_arms() if cg.direction in blocked_crossings(self.layout, (a,))]
                           for cid, cg in self._crossings.items()}
         # additional sections this arm's light needs (Task: not every light is a plain 3-lamp head any more) — one per
@@ -328,12 +328,14 @@ class SimulationEngine:
         if not self._perception_usable():
             return {"camera_ok": False, "recipient": None, "vehicles": 0, "pedestrians": 0}
         p = self._perception
-        vehicles = sum(p["vehicles"].values())
-        pedestrians = sum(p["pedestrians_waiting"].values())
-        if any(p["ped_priority"].values()) or (pedestrians and not vehicles):
+        vehicles = sum(n for arm, n in p["vehicles"].items() if arm in self.layout.enabled_arms())
+        pedestrians = sum(n for cid, n in p["pedestrians_waiting"].items() if cid in self._crossings)
+        if pedestrians > vehicles:
             recipient = "pedestrians"
-        elif vehicles:
+        elif vehicles > pedestrians:
             recipient = "drivers"
+        elif vehicles:
+            recipient = "balanced"
         else:
             recipient = None
         return {"camera_ok": True, "recipient": recipient, "vehicles": vehicles, "pedestrians": pedestrians}
@@ -479,10 +481,18 @@ class SimulationEngine:
             return elapsed >= sg.yellow
         if kind == 2:
             # all-red: wait for the stage that just had green to leave the box (phase 2 -> stage 0, phase 5 -> stage 1 ...)
+            if (self._orphan_pedestrian_demand() or
+                    any(p.state == "crossing" and p.crossing_id in self._orphan_crossings
+                        for p in self._pedestrians.values())):
+                return False
             return elapsed >= MAX_ALL_RED_S or (elapsed >= sg.all_red and not self._arms_in_conflict_zone(self._stages[stage]))
         if self.failsafe_reason():
             return elapsed >= FAILSAFE_GREEN
-        if elapsed >= sg.max_green:
+        # Camera-driven holding is only available with a healthy, fresh frame.
+        # Otherwise keep the original timer plan (including camera-loss fallback).
+        if not self._perception_usable() and elapsed >= sg.max_green:
+            return True
+        if self._roundabout and elapsed >= sg.max_green:
             return True
         if self._peds_crossing_for(stage):
             return False
@@ -492,8 +502,13 @@ class SimulationEngine:
         if elapsed >= EMERGENCY_MIN_GREEN and any(self._emergency_demand(k) for k in others):
             return True
         cur, other = self._demand(stage), sum(self._demand(k) for k in others)
-        if elapsed >= sg.min_green and any(self._ped_priority(k) for k in others):
-            return True                                   # many pedestrians: give their phase priority
+        orphan_peds = self._orphan_pedestrian_demand()
+        other += orphan_peds
+        if elapsed >= sg.min_green and (any(self._ped_priority(k) for k in others) or
+                                        orphan_peds > self._total_vehicle_demand()):
+            return True                                   # the larger pedestrian queue gets priority
+        if elapsed >= sg.max_green and other > 0:
+            return True
         if elapsed >= sg.min_green and cur == 0 and other > 0:
             return True
         if elapsed >= sg.base_green and other > 0:
@@ -532,35 +547,54 @@ class SimulationEngine:
     def _serves(self, stage: int, cid: str) -> bool:
         return stage in self._crossing_stages.get(cid, ())
 
-    def _demand(self, stage: int) -> int:
-        """Vehicles queued/approaching on the stage arms plus pedestrians that need its green."""
+    def _vehicle_demand(self, stage: int) -> int:
         arms = self._stages[stage]
         if self._perception_usable():
-            p = self._perception
-            return (sum(p["vehicles"].get(d, 0) for d in arms) +
-                    sum(n for cid, n in p["pedestrians_waiting"].items() if cid in self._crossings and self._serves(stage, cid)))
-        n = 0
-        for v in self._vehicles.values():
-            if v.direction not in arms:
-                continue
-            d = self._dist_to_stop(v)
-            if v.state == "waiting" or -0.5 < d < DEMAND_LOOKAHEAD_M:
-                n += 1
-        for p in self._pedestrians.values():
-            if p.state == "waiting_for_green" and self._serves(stage, p.crossing_id):
-                n += 1
-        return n
+            return sum(self._perception["vehicles"].get(d, 0) for d in arms)
+        return sum(1 for v in self._vehicles.values()
+                   if v.direction in arms and (v.state == "waiting" or
+                   -0.5 < self._dist_to_stop(v) < DEMAND_LOOKAHEAD_M))
+
+    def _pedestrian_demand(self, stage: int) -> int:
+        if self._perception_usable():
+            return sum(n for cid, n in self._perception["pedestrians_waiting"].items()
+                       if cid in self._crossings and self._serves(stage, cid))
+        return sum(1 for p in self._pedestrians.values()
+                   if p.state == "waiting_for_green" and self._serves(stage, p.crossing_id))
+
+    def _orphan_pedestrian_demand(self) -> int:
+        """Waiting pedestrians whose crossing has no vehicle stage that can safely serve it."""
+        if self._perception_usable():
+            return sum(n for cid, n in self._perception["pedestrians_waiting"].items()
+                       if cid in self._orphan_crossings)
+        return sum(1 for p in self._pedestrians.values()
+                   if p.state == "waiting_for_green" and p.crossing_id in self._orphan_crossings)
+
+    def _total_vehicle_demand(self) -> int:
+        if self._perception_usable():
+            return sum(n for arm, n in self._perception["vehicles"].items()
+                       if arm in self.layout.enabled_arms())
+        return sum(self._vehicle_demand(k) for k in range(len(self._stages)))
+
+    def _demand(self, stage: int) -> int:
+        """Vehicles queued/approaching on the stage arms plus pedestrians that need its green."""
+        return self._vehicle_demand(stage) + self._pedestrian_demand(stage)
 
     def _ped_priority(self, stage: int) -> bool:
-        """A crowd waits on a crosswalk that this stage green can serve."""
+        """Give pedestrians priority only when their total queue exceeds the vehicle queue."""
+        if not self._pedestrian_demand(stage):
+            return False
         if self._perception_usable():
-            return any(flag for cid, flag in self._perception["ped_priority"].items()
-                       if cid in self._crossings and self._serves(stage, cid))
-        waiting: Dict[str, int] = {}
-        for p in self._pedestrians.values():
-            if p.state == "waiting_for_green":
-                waiting[p.crossing_id] = waiting.get(p.crossing_id, 0) + 1
-        return any(n >= PED_PRIORITY_THRESHOLD for cid, n in waiting.items() if self._serves(stage, cid))
+            pedestrians = sum(n for cid, n in self._perception["pedestrians_waiting"].items()
+                              if cid in self._crossings)
+            return pedestrians > self._total_vehicle_demand()
+        # Keep the established local-simulation queue threshold. Camera mode
+        # compares measured totals; the local model does not have equivalent
+        # camera observations and must not let a moving roundabout queue make
+        # pedestrian priority oscillate from tick to tick.
+        return any(sum(p.state == "waiting_for_green" and p.crossing_id == cid
+                       for p in self._pedestrians.values()) >= 5
+                   for cid in self._crossings if self._serves(stage, cid))
 
     def _emergency_demand(self, stage: int) -> bool:
         arms = self._stages[stage]
@@ -890,6 +924,14 @@ class SimulationEngine:
         if self._overrides or (self._use_zones and self._crossing_busy(crossing_id)):
             return "RED"
         crossing_time = self._crossings[crossing_id].geo["width"] / 1.4 + PED_MARGIN_S
+        if (crossing_id in self._orphan_crossings and self._phase_index % 3 == 2 and
+                not self._arms_in_conflict_zone(self._blockers[crossing_id])):
+            if self._perception_usable():
+                waiting = self._perception["pedestrians_waiting"].get(crossing_id, 0)
+            else:
+                waiting = any(p.crossing_id == crossing_id and p.state == "waiting_for_green"
+                              for p in self._pedestrians.values())
+            return "GREEN" if waiting else "RED"
         if self.fixed_program:
             return "GREEN" if self._fixed_window_ok(crossing_id, crossing_time) else "RED"
         stage, kind = divmod(self._phase_index, 3)
