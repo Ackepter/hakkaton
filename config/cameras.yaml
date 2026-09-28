@@ -2,8 +2,12 @@
 # Every value here can differ between WSL / PC and the Raspberry Pi, so nothing camera related lives in the code.
 #
 # source:   simulation | usb | file | network | image
-# detector: virtual (Simulation Mode: the simulation reports what it "sees")
-#           yolo    (local YOLO through ultralytics, CPU only)  -> pip install -r requirements-yolo.txt
+# detector: virtual (Simulation Mode default: the simulation reports what it "sees". YOLO is a real photo model
+#                    and does NOT recognise the flat-shaded 3D render as car/person - tested: it reads the boxes
+#                    as "airplane" and gets filtered out, so forcing "yolo" here silently sees nothing. Task.md
+#                    §56 explicitly asks for this virtual channel instead of pointing YOLO at the 3D scene.)
+#           yolo    (default for usb/file/network - local YOLO through ultralytics, CPU only)
+#                    -> pip install -r requirements-yolo.txt and drop weights at model_path (models/yolov8n.pt)
 #           none    (image only, no analysis -> system stays in FAILSAFE)
 # zones:    polygons in normalised image coordinates (0..1, origin top-left). Lane zones are counted for vehicles,
 #           pedestrian zones for people. A simulation camera generates its zones automatically.
