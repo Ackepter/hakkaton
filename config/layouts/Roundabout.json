@@ -12,7 +12,9 @@
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "south": {
       "enabled": true,
@@ -23,7 +25,9 @@
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "east": {
       "enabled": true,
@@ -34,7 +38,9 @@
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "west": {
       "enabled": true,
@@ -45,7 +51,9 @@
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     }
   },
   "signal": {
