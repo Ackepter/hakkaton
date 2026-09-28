@@ -39,6 +39,28 @@ cameras:
     timeout_s: 2.0                    # no frame for this long -> camera lost -> FAILSAFE
     reconnect_s: 3.0
 
+  - id: CAM-USB
+    name: West approach camera (USB)
+    source: usb
+    uri: "0"                          # device index, found via discover_usb_cameras
+    detector: yolo
+    model_path: models/yolov8n.pt
+    device: cpu
+    imgsz: 320
+    # camera must stay enabled: true to exist as a pipeline at all (disabled cameras are skipped entirely,
+    # not just disconnected - see build_manager in backend/vision/pipeline.py). Toggle it off from the UI instead.
+    x: -30
+    z: 0
+    height_m: 12
+    fov_deg: 55
+    range_m: 75
+    fps: 5
+    width: 640
+    height: 480
+    confidence: 0.5
+    timeout_s: 2.0
+    reconnect_s: 3.0
+
 # ---- examples: replace the block above (or add cameras) when moving to real hardware -----------------------------
 #
 #  - id: CAM-USB

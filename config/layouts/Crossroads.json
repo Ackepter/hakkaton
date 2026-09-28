@@ -4,7 +4,7 @@
   "junction": "signal",
   "arms": {
     "north": {
-      "enabled": false,
+      "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
       "lanes_in": 1,
@@ -17,7 +17,7 @@
       "light_port": 9000
     },
     "south": {
-      "enabled": false,
+      "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
       "lanes_in": 1,
@@ -30,7 +30,7 @@
       "light_port": 9000
     },
     "east": {
-      "enabled": false,
+      "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
       "lanes_in": 1,
@@ -46,7 +46,7 @@
       "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 3,
+      "lanes_in": 1,
       "lanes_out": 1,
       "turns": null,
       "speed_limit_mps": 13.9,
@@ -275,6 +275,26 @@
       "type": "tree",
       "x": 22.0,
       "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t5",
+      "type": "tree",
+      "x": -22.0,
+      "z": -5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t6",
+      "type": "tree",
+      "x": -22.0,
+      "z": 5.0,
       "rotation_deg": 0.0,
       "scale": 1.0,
       "height": null,
