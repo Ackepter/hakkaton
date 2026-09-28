@@ -5,11 +5,11 @@
  */
 import { Html } from '@react-three/drei'
 
-export default function PedestrianLightModel({ direction, state, pos: xz = [0, 0] }) {
+export default function PedestrianLightModel({ direction, state, pos: xz = [0, 0], rotation = 0 }) {
   const walk = state === 'GREEN'
   const color = walk ? '#22ff55' : '#ff2a2a'
   return (
-    <group position={[xz[0], 0, xz[1]]}>
+    <group position={[xz[0], 0, xz[1]]} rotation={[0, rotation, 0]}>
       <mesh position={[0, 1.1, 0]} castShadow>
         <cylinderGeometry args={[0.06, 0.06, 2.2, 8]} />
         <meshLambertMaterial color="#555555" />

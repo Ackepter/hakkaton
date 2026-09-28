@@ -237,4 +237,4 @@ def test_build_manager_skips_disabled_cameras_and_uses_simulation_zones():
     mgr = build_manager([CameraConfig(id="A", source="simulation", enabled=True),
                          CameraConfig(id="B", source="simulation", enabled=False)])
     assert list(mgr.pipelines) == ["A"]
-    assert {z.id for z in mgr.get("A").analyzer.zones} >= {"north-in", "PC-N"}
+    assert {z.id for z in mgr.get("A").analyzer.zones} >= {"east-in", "PC-W"}

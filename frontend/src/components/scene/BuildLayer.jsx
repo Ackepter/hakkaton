@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useThree } from '@react-three/fiber'
 import SceneryObject from './SceneryModels'
 import CameraModel from './CameraModel'
-import { SCENE_TYPES, footprint, hitsRoad, nearestArm, crossingId, snap } from '../../builder/geometry'
+import { SCENE_TYPES, footprint, hitsRoad, nearestArm, crossingId, snap, defaultCamera } from '../../builder/geometry'
 
 import { NEW_CAMERA } from '../../builder/useLayoutDraft'
 
@@ -85,6 +85,21 @@ export default function BuildLayer({ layout, tool, selection, setSelection, acti
     gl.domElement.style.cursor = 'grabbing'
   }
 
+  // No camera placed yet: the default view is only a preview. Touching it materializes a real, editable camera
+  // in its place instead of leaving the builder with nothing to select, drag or delete.
+  const startDefaultCam = (e) => {
+    if (mode !== 'build' || e.button !== 0 || tool !== 'select') return
+    e.stopPropagation()
+    const d = defaultCamera(layout)
+    const id = actions.addCamera(d.x, d.z)
+    actions.update('camera', id, { height_m: d.height_m, fov_deg: d.fov_deg, radius_m: d.radius_m })
+    pickedAt.current = performance.now()
+    setSelection({ kind: 'camera', id })
+    drag.current = { kind: 'camera', id, moved: false }
+    setDragging(true)
+    gl.domElement.style.cursor = 'grabbing'
+  }
+
   const cursorStyle = () => {
     if (mode !== 'build') return spawn ? 'crosshair' : 'default'
     if (tool === 'delete') return 'not-allowed'
@@ -113,6 +128,9 @@ export default function BuildLayer({ layout, tool, selection, setSelection, acti
                      selected={selection?.kind === 'camera' && selection.id === c.id} pickable
                      onPointerDown={startDrag('camera', c.id)} />
       ))}
+      {mode === 'build' && layout.cameras.length === 0 && (
+        <CameraModel cam={defaultCamera(layout)} label="CAM-01" dim pickable onPointerDown={startDefaultCam} />
+      )}
 
       {ghost && <SceneryObject obj={ghost} opacity={0.6} ring={ghostValid ? 'valid' : 'invalid'} />}
       {isCamera && cursor && (

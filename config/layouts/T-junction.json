@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "name": "Roundabout 2-lane entries",
-  "junction": "roundabout",
+  "name": "T-junction",
+  "junction": "signal",
   "arms": {
     "north": {
-      "enabled": true,
+      "enabled": false,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 2,
-      "lanes_out": 2,
+      "lanes_in": 1,
+      "lanes_out": 1,
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
@@ -17,11 +17,11 @@
       "light_port": 9000
     },
     "south": {
-      "enabled": true,
+      "enabled": false,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 2,
-      "lanes_out": 2,
+      "lanes_in": 1,
+      "lanes_out": 1,
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
@@ -33,8 +33,8 @@
       "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 2,
-      "lanes_out": 2,
+      "lanes_in": 1,
+      "lanes_out": 1,
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
@@ -46,8 +46,8 @@
       "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 2,
-      "lanes_out": 2,
+      "lanes_in": 1,
+      "lanes_out": 1,
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
@@ -109,7 +109,7 @@
     ]
   },
   "traffic": {
-    "spawn_rate": 16.0,
+    "spawn_rate": 12.0,
     "ped_spawn_rate": 5.0,
     "type_probs": {
       "car": 0.75,
@@ -239,6 +239,126 @@
       "scale": 1.4,
       "height": 23.0,
       "color": "#af706a"
+    },
+    {
+      "id": "t1",
+      "type": "tree",
+      "x": -22.0,
+      "z": -22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t2",
+      "type": "tree",
+      "x": 22.0,
+      "z": -22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t3",
+      "type": "tree",
+      "x": -22.0,
+      "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t4",
+      "type": "tree",
+      "x": 22.0,
+      "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t5",
+      "type": "tree",
+      "x": -22.0,
+      "z": -5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t6",
+      "type": "tree",
+      "x": -22.0,
+      "z": 5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t7",
+      "type": "tree",
+      "x": 22.0,
+      "z": -5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t8",
+      "type": "tree",
+      "x": 22.0,
+      "z": 5.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t9",
+      "type": "tree",
+      "x": -5.0,
+      "z": -22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t10",
+      "type": "tree",
+      "x": 5.0,
+      "z": -22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t11",
+      "type": "tree",
+      "x": -5.0,
+      "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
+    },
+    {
+      "id": "t12",
+      "type": "tree",
+      "x": 5.0,
+      "z": 22.0,
+      "rotation_deg": 0.0,
+      "scale": 1.0,
+      "height": null,
+      "color": null
     }
   ],
   "cameras": []

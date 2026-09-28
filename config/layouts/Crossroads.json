@@ -4,22 +4,20 @@
   "junction": "signal",
   "arms": {
     "north": {
-      "enabled": true,
+      "enabled": false,
       "length_m": 80.0,
       "lane_type": "mixed",
       "lanes_in": 1,
       "lanes_out": 1,
-      "turns": [
-        [
-          "left"
-        ]
-      ],
+      "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "south": {
-      "enabled": true,
+      "enabled": false,
       "length_m": 80.0,
       "lane_type": "mixed",
       "lanes_in": 1,
@@ -27,10 +25,12 @@
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "east": {
-      "enabled": true,
+      "enabled": false,
       "length_m": 80.0,
       "lane_type": "mixed",
       "lanes_in": 1,
@@ -38,18 +38,22 @@
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     },
     "west": {
       "enabled": true,
       "length_m": 80.0,
       "lane_type": "mixed",
-      "lanes_in": 1,
+      "lanes_in": 3,
       "lanes_out": 1,
       "turns": null,
       "speed_limit_mps": 13.9,
       "crossing": true,
-      "weight": 1.0
+      "weight": 1.0,
+      "light_ip": null,
+      "light_port": 9000
     }
   },
   "signal": {
@@ -271,26 +275,6 @@
       "type": "tree",
       "x": 22.0,
       "z": 22.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t5",
-      "type": "tree",
-      "x": -22.0,
-      "z": -5.0,
-      "rotation_deg": 0.0,
-      "scale": 1.0,
-      "height": null,
-      "color": null
-    },
-    {
-      "id": "t6",
-      "type": "tree",
-      "x": -22.0,
-      "z": 5.0,
       "rotation_deg": 0.0,
       "scale": 1.0,
       "height": null,

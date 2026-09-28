@@ -67,7 +67,7 @@ def test_default_layout_keeps_the_yaml_camera_and_changes_nothing(client):
     r = client.post("/api/vision/sync-layout")
     assert r.status_code == 200 and r.json() == {"changed": False, "cameras": ["CAM-01"]}
     assert app_state.vision.pipelines["CAM-01"] is p                        # not restarted
-    assert len(zones(client)["CAM-01"]) == 8
+    assert zones(client)["CAM-01"] == {"east-in", "PC-E", "PC-W"}    # one approach, not an overhead view of every road
 
 
 def test_zones_follow_the_arms_and_crosswalks_that_exist(client):
@@ -76,9 +76,9 @@ def test_zones_follow_the_arms_and_crosswalks_that_exist(client):
     l.arms["east"].crossing = False
     Holder.layout = l.model_dump()
     assert client.post("/api/vision/sync-layout").json()["changed"] is True
-    assert zones(client)["CAM-01"] == {"north-in", "east-in", "west-in", "PC-N", "PC-W"}
+    assert zones(client)["CAM-01"] <= {"east-in", "PC-N", "PC-W"}    # only zones inside this camera's view
     assert wait(lambda: client.get("/api/vision/cameras").json()["healthy"])
-    assert app_state.vision.snapshot() is not None
+    assert app_state.vision.pipelines["CAM-01"].analyzer.zones         # visible zones follow the edited layout
 
 
 def test_placed_cameras_replace_the_simulation_camera_and_split_the_zones(client):

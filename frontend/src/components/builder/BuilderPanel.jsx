@@ -77,6 +77,19 @@ function ObjectsTab({ draft, tool, setTool, rotation, setRotation, selection, ac
         <Row label="Rotation"><Slider value={rotation} min={0} max={345} step={15} unit="°" onChange={setRotation} /></Row>
         <div style={{ fontSize: 11, color: C.faint }}>R rotates the ghost. Green ring = free spot, red = on a road or crosswalk.</div>
       </Section>
+      <Section title="Cameras">
+        {draft.cameras.length === 0 && <div style={{ color: C.faint, fontSize: 11 }}>No placed cameras. The default side view is replaced when you add one.</div>}
+        {draft.cameras.map(cam => (
+          <div key={cam.id} style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: 4 }}>
+            <Btn small onClick={() => setSelection({ kind: 'camera', id: cam.id })} style={{ flex: 1, textAlign: 'left' }}
+                 testid={`camera-select-${cam.id}`}>📷 {cam.id}</Btn>
+            <Btn small color={C.red} onClick={() => {
+              actions.remove('camera', cam.id)
+              if (selection?.kind === 'camera' && selection.id === cam.id) clear()
+            }} testid={`camera-delete-${cam.id}`}>✕</Btn>
+          </div>
+        ))}
+      </Section>
       <Section title="Selected object"><Inspector draft={draft} selection={selection} actions={actions} clear={clear} /></Section>
       <div style={{ fontSize: 11, color: C.faint }}>{draft.scenery.length} objects · {draft.cameras.length}/4 cameras</div>
     </>

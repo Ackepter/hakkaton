@@ -56,7 +56,7 @@ class CameraConfig:
     zones: List[Zone] = field(default_factory=list)
     enabled: bool = True
     # mount of the camera (pinhole model, see camera_model): position on the ground plan, height, heading and tilt.
-    # x None = the default overhead camera above the middle of the junction (sees all four approaches);
+    # x None = a directional default camera mounted beside one approach;
     # yaw / pitch None = aim at the middle of the junction; height / fov / range None = sensible defaults.
     x: Optional[float] = None
     z: Optional[float] = None
@@ -73,12 +73,11 @@ class CameraConfig:
 
     def pose(self, box_half: float = 16.0):
         from .camera_model import CameraPose
-        overhead = self.x is None
-        return CameraPose(x=self.x if self.x is not None else 0.0, z=self.z if self.z is not None else 0.0,
-                          height_m=self.height_m or (2.8 * box_half if overhead else 12.0),
+        return CameraPose(x=self.x if self.x is not None else -(box_half + 14.0),
+                          z=self.z if self.z is not None else 0.0,
+                          height_m=self.height_m or 12.0,
                           yaw_deg=self.yaw_deg, pitch_deg=self.pitch_deg,
-                          fov_deg=self.fov_deg or (100.0 if overhead else 70.0),
-                          range_m=self.range_m or (150.0 if overhead else 90.0))
+                          fov_deg=self.fov_deg or 55.0, range_m=self.range_m or 75.0)
 
 
 def _zone_from_dict(d: Dict[str, Any]) -> Zone:

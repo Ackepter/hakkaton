@@ -119,7 +119,8 @@ def test_camera_sees_the_simulation(running_sim):
 
 
 def test_camera_counts_match_the_simulation_ground_truth(running_sim):
-    """The detections come from the XML the simulation published, so per-arm counts must track the real queues."""
+    """CAM-01 is mounted on the west approach aimed east (config/cameras.yaml): it only ever sees the east
+    approach and its own crossing (test_vision_sync.py::test_default_layout_...), never north/south/west traffic."""
     s, b, *_ = running_sim
     time.sleep(6)
     diffs = []
@@ -127,7 +128,7 @@ def test_camera_counts_match_the_simulation_ground_truth(running_sim):
         truth = s.get("/simulation/state").json()
         seen = b.get("/api/vision/analysis").json()
         assert seen is not None
-        veh_in_view = [v for v in truth["vehicles"] if abs(v["position_m"] - 80) <= 64]
+        veh_in_view = [v for v in truth["vehicles"] if v["direction"] == "east" and abs(v["position_m"] - 80) <= 64]
         diffs.append(abs(len(veh_in_view) - seen["vehicles"]))
         time.sleep(0.5)
     assert min(diffs) <= 2 and sum(diffs) / len(diffs) <= 6      # a few frames of latency at 5x speed, no more

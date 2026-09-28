@@ -451,8 +451,10 @@ def test_the_junction_type_catalogue_loads_a_roundabout_and_back(stack):
 
 def test_camera_pose_is_edited_in_the_inspector(stack):
     b, si = stack
-    fresh(si)
+    fresh(si, "Avenue with U-turn")                                      # this preset includes a placed camera
     enter_build(b)
+    assert wait(lambda: b.exists("camera-delete-CAM-01"))
+    b.click_testid("camera-delete-CAM-01")                              # cameras can be removed without picking a tiny 3D mast
     b.click_testid("tool-camera")
     b.click_world(-34, -34)
     b.click_testid("tool-select")

@@ -10,19 +10,20 @@ import pytest
 from backend.vision.camera_model import CameraPose, PinholeCamera
 from smart_intersection.geometry import light_pole
 from smart_intersection.layout import (ARMS, Layout, SCENE_TYPES, box_half, default_layout, hits_road, is_split, min_arm_length,
-                                       presets, stages)
+                                       presets, stages, has_crossing)
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 
 RUNNER = """
 import { hitsRoad, roadRects, boxHalf, stages, isSplit, minArmLength, lightPole, cameraFootprint, cameraAim, ARMS,
-         SCENE_TYPES, snap, nearestArm, nextId } from './frontend/src/builder/geometry.js'
+         SCENE_TYPES, snap, nearestArm, nextId, pedestrianLightPoles, hasCrossing } from './frontend/src/builder/geometry.js'
 import fs from 'node:fs'
 const data = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 const out = data.cases.map(c => ({ hits: hitsRoad(c.layout, c.x, c.z, c.r), rects: roadRects(c.layout).length }))
 const meta = data.layouts.map(l => ({ box: boxHalf(l), stages: stages(l), split: isSplit(l), minLen: minArmLength(l),
-  poles: ARMS.filter(a => l.arms[a].enabled).map(a => lightPole(l, a)) }))
+  poles: ARMS.filter(a => l.arms[a].enabled).map(a => lightPole(l, a)),
+  pedPoles: ARMS.filter(a => hasCrossing(l, a)).map(a => [a, pedestrianLightPoles(l, a)]) }))
 const cams = data.cameras.map(c => ({ foot: cameraFootprint(c, 4 / 3), aim: cameraAim(c) }))
 const radii = Object.fromEntries(Object.entries(SCENE_TYPES).map(([k, v]) => [k, v.radius]))
 console.log(JSON.stringify({ out, meta, cams, radii, snap: [snap(3.1), snap(-3.1), snap(0.9), snap(1.0)],
@@ -101,6 +102,16 @@ def test_box_size_stages_and_light_poles_match():
         assert m["stages"] == [list(s) for s in stages(l)], l.name
         assert m["split"] == is_split(l), l.name
         assert [tuple(p) for p in m["poles"]] == [light_pole(l, a) for a in ARMS if l.arms[a].enabled], l.name
+
+
+def test_each_crosswalk_has_two_pedestrian_signals_facing_inward():
+    res = run_node(Path(__import__("tempfile").mkdtemp()), payload())
+    for layout, meta in zip(layouts(), res["meta"]):
+        expected = {a for a in ARMS if has_crossing(layout, a)}
+        assert {a for a, _ in meta["pedPoles"]} == expected
+        for arm, poles in meta["pedPoles"]:
+            assert len(poles) == 2, (layout.name, arm)
+            assert poles[0]["pos"] != poles[1]["pos"]
 
 
 def test_camera_footprint_and_auto_aim_match_the_vision_module():
