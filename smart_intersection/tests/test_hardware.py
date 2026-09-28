@@ -14,7 +14,7 @@ import yaml
 
 from fastapi.testclient import TestClient
 
-from smart_intersection.engine.simulation import SimulationEngine
+from smart_intersection.engine.simulation import SimulationEngine, GREEN_BLINK_COUNT, GREEN_BLINK_HALF_S
 from smart_intersection.hardware.config import load_light_hardware
 from smart_intersection.hardware.udp_matrix import HEIGHT, RADIUS, WIDTH, UdpMatrixLight, _BLANK, _FRAMES, make_frame
 from smart_intersection.layout import default_layout, presets
@@ -170,9 +170,10 @@ def test_configured_lights_receive_every_state_the_real_ones_show():
     hw = {"TL-N": RecordingLight(), "TL-E": RecordingLight()}
     e = SimulationEngine(seed=1, layout=default_layout(), light_hardware=hw)
     e.advance(20)
-    assert hw["TL-N"].sent and hw["TL-N"].sent[-1] == e._lights["TL-N"].state
-    assert hw["TL-E"].sent and hw["TL-E"].sent[-1] == e._lights["TL-E"].state
-    assert set(hw["TL-N"].sent) <= {"RED", "YELLOW", "GREEN"}
+    # "OFF"/extra "GREEN"/"YELLOW" ticks are the real-signal-only edge effects (see _hw_state); never the light's own state
+    assert hw["TL-N"].sent and hw["TL-N"].sent[-1] in (e._lights["TL-N"].state, "GREEN", "OFF", "YELLOW")
+    assert hw["TL-E"].sent and hw["TL-E"].sent[-1] in (e._lights["TL-E"].state, "GREEN", "OFF", "YELLOW")
+    assert set(hw["TL-N"].sent) <= {"RED", "YELLOW", "GREEN", "OFF"}
     assert len(hw["TL-N"].sent) == len(hw["TL-E"].sent) > 1                # ticked (and sent) more than once
 
 
@@ -201,7 +202,7 @@ def test_hardware_is_wired_for_a_roundabout_too():
     hw = {"TL-N": RecordingLight()}
     e = SimulationEngine(seed=1, layout=presets()["Roundabout"], light_hardware=hw)
     e.advance(20)
-    assert hw["TL-N"].sent and set(hw["TL-N"].sent) <= {"RED", "YELLOW", "GREEN"}
+    assert hw["TL-N"].sent and set(hw["TL-N"].sent) <= {"RED", "YELLOW", "GREEN", "OFF"}
 
 
 def test_the_light_never_changes_the_simulations_own_state():
@@ -215,6 +216,71 @@ def test_the_light_never_changes_the_simulations_own_state():
             out.append(tuple(sorted((l.id, l.state) for l in e._lights.values())))
         return out
     assert trace(7, {"TL-N": RecordingLight()}) == trace(7, {})
+
+
+def test_green_blinks_once_then_yellow_fills_the_rest_of_the_window(monkeypatch):
+    """A GREEN -> * edge must blink the real light GREEN_BLINK_COUNT times, then hold YELLOW for the remainder of
+    GREEN_END_WINDOW_S, and only then show the new state — timed by wall clock so it never changes phase durations.
+    Force the edge with a manual override so it fires on demand."""
+    import smart_intersection.engine.simulation as sim_mod
+    from smart_intersection.engine.simulation import GREEN_END_WINDOW_S
+
+    clock = [1_000.0]
+    monkeypatch.setattr(sim_mod.time, "monotonic", lambda: clock[0])
+    hw = {"TL-N": RecordingLight()}
+    e = SimulationEngine(seed=1, layout=default_layout(), light_hardware=hw)
+
+    e.set_light_state("TL-N", "GREEN")
+    e._tick(0.1)                                    # records GREEN as the last-seen state
+    e.set_light_state("TL-N", "RED")                # GREEN -> RED edge, should start the blink
+    hw["TL-N"].sent.clear()
+
+    step = 0.3
+    n = int(GREEN_END_WINDOW_S / step) + 3
+    seen = []
+    for _ in range(n):
+        e._tick(0.1)
+        seen.append(hw["TL-N"].sent[-1])
+        clock[0] += step
+
+    blink = seen[:GREEN_BLINK_COUNT * 2]
+    assert blink == ["GREEN", "OFF"] * GREEN_BLINK_COUNT
+    switched_at = next(i for i, s in enumerate(seen) if s == "RED")
+    assert all(s == "YELLOW" for s in seen[GREEN_BLINK_COUNT * 2:switched_at])
+    assert switched_at * step >= GREEN_END_WINDOW_S - step
+    assert all(s == "RED" for s in seen[switched_at:])
+
+
+def test_yellow_holds_for_a_couple_seconds_on_a_red_to_green_edge(monkeypatch):
+    """A RED -> GREEN edge must hold YELLOW on the real signal for RED_TO_GREEN_YELLOW_S before actually going
+    GREEN, timed by wall clock (not sim time) so it never changes phase durations."""
+    import smart_intersection.engine.simulation as sim_mod
+    from smart_intersection.engine.simulation import RED_TO_GREEN_YELLOW_S
+
+    clock = [1_000.0]
+    monkeypatch.setattr(sim_mod.time, "monotonic", lambda: clock[0])
+    hw = {"TL-N": RecordingLight()}
+    e = SimulationEngine(seed=1, layout=default_layout(), light_hardware=hw)
+
+    e.set_light_state("TL-N", "RED")
+    e._tick(0.1)                                    # default_layout starts TL-N GREEN, so this is a GREEN -> RED
+    clock[0] += GREEN_BLINK_COUNT * 2 * GREEN_BLINK_HALF_S + 1.0  # drain that blink before starting the real test
+    e._tick(0.1)                                    # now cleanly RED
+    e.set_light_state("TL-N", "GREEN")              # RED -> GREEN edge, should hold YELLOW first
+    hw["TL-N"].sent.clear()
+
+    step = 0.5
+    n = int(RED_TO_GREEN_YELLOW_S / step) + 3
+    seen = []
+    for _ in range(n):
+        e._tick(0.1)
+        seen.append(hw["TL-N"].sent[-1])
+        clock[0] += step
+
+    switched_at = next(i for i, s in enumerate(seen) if s == "GREEN")
+    assert all(s == "YELLOW" for s in seen[:switched_at])
+    assert switched_at * step >= RED_TO_GREEN_YELLOW_S - step
+    assert all(s == "GREEN" for s in seen[switched_at:])
 
 
 def test_no_hardware_configured_is_the_default_and_costs_nothing():
