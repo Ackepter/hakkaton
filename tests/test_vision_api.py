@@ -81,7 +81,7 @@ def test_camera_listing_and_status(client):
     cam = d["cameras"][0]
     assert d["active"] and d["healthy"] and cam["id"] == "CAM-01" and cam["state"] == "connected"
     assert cam["detector"]["name"] == "virtual" and cam["detector"]["state"] == "ok"
-    assert cam["fps"] > 3 and cam["width"] == 320 and any(z["id"] == "north-in" for z in cam["zones"])
+    assert cam["fps"] > 3 and cam["width"] == 320 and any(z["id"] == "east-in" for z in cam["zones"])
     assert d["analysis"]["vehicles"] > 0
     assert client.get("/api/vision/cameras/CAM-01").json()["id"] == "CAM-01"
 

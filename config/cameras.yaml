@@ -10,9 +10,10 @@
 #
 # mount:    x, z, height_m, yaw_deg, pitch_deg, fov_deg, range_m describe where a camera hangs and where it looks
 #           (metres; yaw = compass bearing 0 = north, pitch = downward tilt, fov = horizontal angle). Leave them out
-#           for the default overhead camera above the middle of the junction. Give them to a REAL camera (usb, file,
-#           network) as well: the lane and crosswalk zones are then projected into its image automatically, exactly as
-#           for the virtual camera (measure the mast on the mock-up, no polygons to draw by hand).
+#           for a default camera mounted beside the west approach, aimed at the junction (one approach's worth of
+#           coverage, like a real mast-mounted camera). Give them to a REAL camera (usb, file, network) as well: the
+#           lane and crosswalk zones are then projected into its image automatically, exactly as for the virtual
+#           camera (measure the mast on the mock-up, no polygons to draw by hand). Add more cameras for full coverage.
 #
 # A camera is NOT required to start the backend or the Dashboard.
 
