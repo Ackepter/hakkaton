@@ -4,6 +4,8 @@
  */
 import { useState } from 'react'
 import axios from 'axios'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/input'
 
 const SI_URL = 'http://localhost:8001'
 
@@ -53,72 +55,49 @@ export default function SimControls({ simStatus, metrics, cameraFailure = false,
   const isPaused  = simStatus === 'paused'
 
   return (
-    <div style={{ color: '#fff', fontSize: 13 }}>
-      <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14, color: '#e2e8f0' }}>
-        Simulation Controls
-      </div>
+    <div className="text-sm">
+      <div className="mb-3 text-sm font-semibold">Simulation Controls</div>
 
       {/* Scenario picker */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>Scenario</div>
-        <select
-          value={scenario}
-          onChange={e => setScenario(e.target.value)}
-          style={{
-            width: '100%', background: '#1e293b', color: '#fff',
-            border: '1px solid #334155', borderRadius: 4, padding: '4px 6px', fontSize: 12,
-          }}
-        >
+      <div className="mb-2.5">
+        <div className="mb-1 text-[11px] text-muted-foreground">Scenario</div>
+        <Select value={scenario} onChange={e => setScenario(e.target.value)} className="w-full">
           {SCENARIOS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        </Select>
       </div>
 
       {/* Action buttons */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-        <button
-          onClick={handleStart}
-          disabled={isRunning}
-          style={btnStyle(isRunning ? '#166534' : '#15803d')}
-        >▶ Start</button>
-
-        <button
-          onClick={handlePause}
-          disabled={!isRunning && !isPaused}
-          style={btnStyle(isPaused ? '#1d4ed8' : '#b45309')}
-        >{isPaused ? '▶ Resume' : '⏸ Pause'}</button>
-
-        <button
-          onClick={handleReset}
-          style={btnStyle('#374151')}
-        >↺ Reset</button>
+      <div className="mb-2.5 flex flex-wrap gap-1.5">
+        <Button size="sm" onClick={handleStart} disabled={isRunning} className="bg-success hover:bg-success/90">▶ Start</Button>
+        <Button size="sm" onClick={handlePause} disabled={!isRunning && !isPaused} variant={isPaused ? 'default' : 'secondary'}>
+          {isPaused ? '▶ Resume' : '⏸ Pause'}
+        </Button>
+        <Button size="sm" onClick={handleReset} variant="secondary">↺ Reset</Button>
       </div>
 
       {/* Signal control mode */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>Signal control</div>
-        <select
-          value={controlMode}
-          onChange={e => { setControlMode(e.target.value); call('post', '/simulation/config', { control_mode: e.target.value }) }}
-          style={{ width: '100%', background: '#1e293b', color: '#fff', border: '1px solid #334155', borderRadius: 4, padding: '4px 6px', fontSize: 12 }}
-        >
+      <div className="mb-2.5">
+        <div className="mb-1 text-[11px] text-muted-foreground">Signal control</div>
+        <Select value={controlMode} className="w-full"
+          onChange={e => { setControlMode(e.target.value); call('post', '/simulation/config', { control_mode: e.target.value }) }}>
           <option value="auto">Camera analysis (AUTO)</option>
           <option value="failsafe">Timer (fixed timing)</option>
-        </select>
+        </Select>
       </div>
 
       {/* Camera failure (scenario "Camera/Detection Failure") */}
-      <button
-        onClick={() => call('post', '/simulation/camera-failure', { active: !cameraFailure })}
-        style={{ ...btnStyle(cameraFailure ? '#b91c1c' : '#374151'), width: '100%', marginBottom: 10 }}
-      >{cameraFailure ? '📷 Вернуть камеру' : '📷 Сбой камеры'}</button>
+      <Button size="sm" className="mb-2.5 w-full" variant={cameraFailure ? 'destructive' : 'secondary'}
+        onClick={() => call('post', '/simulation/camera-failure', { active: !cameraFailure })}>
+        {cameraFailure ? '📷 Вернуть камеру' : '📷 Сбой камеры'}
+      </Button>
       {failsafeReason && (
-        <div style={{ color: '#fca5a5', fontSize: 11, marginBottom: 10 }}>FAILSAFE: {failsafeReason}</div>
+        <div className="mb-2.5 text-[11px] text-destructive">FAILSAFE: {failsafeReason}</div>
       )}
 
       {/* Speed slider */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
-          Speed: <strong style={{ color: '#fff' }}>{timeScale}×</strong>
+      <div className="mb-3">
+        <div className="mb-1 text-[11px] text-muted-foreground">
+          Speed: <strong className="text-foreground">{timeScale}×</strong>
         </div>
         <input
           type="range" min="0.25" max="10" step="0.25"
@@ -126,18 +105,18 @@ export default function SimControls({ simStatus, metrics, cameraFailure = false,
           onChange={e => setTimeScale(parseFloat(e.target.value))}
           onMouseUp={handleSpeedRelease}
           onTouchEnd={handleSpeedRelease}
-          style={{ width: '100%', cursor: 'pointer' }}
+          className="w-full cursor-pointer accent-primary"
         />
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontSize: 10 }}>
+        <div className="flex justify-between text-[10px] text-muted-foreground">
           <span>0.25×</span><span>10×</span>
         </div>
       </div>
 
       {/* Status */}
-      <div style={{ borderTop: '1px solid #1e293b', paddingTop: 8, fontSize: 11, color: '#94a3b8' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+      <div className="border-t border-border pt-2 text-[11px] text-muted-foreground">
+        <div className="mb-1 flex justify-between">
           <span>Status</span>
-          <span style={{ color: isRunning ? '#4ade80' : isPaused ? '#fbbf24' : '#64748b', fontWeight: 600 }}>
+          <span className={`font-semibold ${isRunning ? 'text-green-400' : isPaused ? 'text-amber-400' : 'text-muted-foreground'}`}>
             {simStatus || 'stopped'}
           </span>
         </div>
@@ -157,16 +136,9 @@ export default function SimControls({ simStatus, metrics, cameraFailure = false,
 
 function StatRow({ label, value }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+    <div className="mb-0.5 flex justify-between">
       <span>{label}</span>
-      <span style={{ fontFamily: 'monospace', color: '#cbd5e1' }}>{value}</span>
+      <span className="font-mono text-foreground/80">{value}</span>
     </div>
   )
-}
-
-function btnStyle(bg) {
-  return {
-    background: bg, color: '#fff', border: 'none', borderRadius: 4,
-    padding: '5px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 500,
-  }
 }

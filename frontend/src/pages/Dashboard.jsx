@@ -1,7 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import api, { controlApi, lightsApi } from '../api/client'
 import CameraView from '../components/CameraView'
+import { Card, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, Legend
@@ -11,15 +15,17 @@ const LIGHT_COLORS = { RED: '#fc8181', YELLOW: '#f6e05e', GREEN: '#68d391', FLAS
 const SECTION_GLYPH = { left: '↰', right: '↱', uturn: '↩' }
 const MODE_COLORS = { AUTO: '#68d391', MANUAL: '#63b3ed', FAILSAFE: '#fc8181' }
 const CONGESTION_COLORS = { CLEAR: '#68d391', MODERATE: '#f6e05e', CONGESTED: '#ed8936', GRIDLOCK: '#fc8181' }
+const CHART_TOOLTIP = { background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', color: 'hsl(var(--foreground))', fontSize: 12 }
+const CHART_TICK = { fill: 'hsl(var(--muted-foreground))', fontSize: 10 }
 
 function TrafficLightBulb({ state, size = 28 }) {
   const states = ['RED', 'YELLOW', 'GREEN']
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, background: '#1a202c', padding: 8, borderRadius: 8, border: '1px solid #2d3748' }}>
+    <div className="flex flex-col gap-1 rounded-lg border border-border bg-background p-2">
       {states.map(s => (
         <div key={s} style={{
           width: size, height: size, borderRadius: '50%',
-          background: state === s ? LIGHT_COLORS[s] : '#2d3748',
+          background: state === s ? LIGHT_COLORS[s] : 'hsl(var(--border))',
           boxShadow: state === s ? `0 0 12px ${LIGHT_COLORS[s]}` : 'none',
           transition: 'all 0.3s',
         }} />
@@ -32,12 +38,11 @@ function ModeButton({ mode, current, onClick }) {
   const active = current === mode
   return (
     <button
+      className="rounded-md border-2 px-4 py-1.5 text-xs font-bold transition-colors"
       style={{
-        padding: '8px 20px', borderRadius: 6, cursor: 'pointer', fontWeight: 700,
-        fontSize: 13, border: `2px solid ${MODE_COLORS[mode]}`,
+        borderColor: MODE_COLORS[mode],
         background: active ? MODE_COLORS[mode] + '33' : 'transparent',
-        color: active ? MODE_COLORS[mode] : '#a0aec0',
-        transition: 'all 0.15s',
+        color: active ? MODE_COLORS[mode] : 'hsl(var(--muted-foreground))',
       }}
       onClick={() => onClick(mode)}
     >
@@ -48,16 +53,16 @@ function ModeButton({ mode, current, onClick }) {
 
 function StatCard({ label, value, unit, color }) {
   return (
-    <div style={{ background: '#1a1d27', border: '1px solid #2d3748', borderRadius: 8, padding: '14px 18px', minWidth: 130 }}>
-      <div style={{ color: '#718096', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{label}</div>
-      <div style={{ color: color || '#e2e8f0', fontSize: 26, fontWeight: 700 }}>{value}</div>
-      {unit && <div style={{ color: '#718096', fontSize: 11 }}>{unit}</div>}
-    </div>
+    <Card className="min-w-[130px] px-4.5 py-3.5">
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-2xl font-bold" style={{ color: color || 'hsl(var(--foreground))' }}>{value}</div>
+      {unit && <div className="text-[11px] text-muted-foreground">{unit}</div>}
+    </Card>
   )
 }
 
 export default function Dashboard() {
-  const { connected, lastMessage, send } = useWebSocket()
+  const { connected, lastMessage } = useWebSocket()
   const [wsData, setWsData] = useState(null)
   const [chartData, setChartData] = useState([])
   const [mode, setMode] = useState('AUTO')
@@ -137,89 +142,76 @@ export default function Dashboard() {
   const system = wsData?.metrics?.system || {}
   const extra = wsData?.metrics?.extra || {}
 
-  const s = {
-    page: { minHeight: 'calc(100vh - 56px)', background: '#0f1117', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 },
-    row: { display: 'flex', gap: 12, flexWrap: 'wrap' },
-    card: { background: '#1a1d27', border: '1px solid #2d3748', borderRadius: 10, padding: 16 },
-    cardTitle: { fontWeight: 700, fontSize: 14, color: '#e2e8f0', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 },
-    section: { display: 'flex', gap: 12, flexWrap: 'wrap' },
-  }
-
   return (
-    <div style={s.page}>
+    <div className="flex min-h-screen flex-col gap-3 p-4">
       {/* Top status bar */}
-      <div style={{ ...s.card, display: 'flex', alignItems: 'center', gap: 16, padding: '10px 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: connected ? '#68d391' : '#fc8181' }} />
-          <span style={{ fontSize: 13, color: connected ? '#68d391' : '#fc8181' }}>
+      <Card className="flex flex-wrap items-center gap-4 px-5 py-2.5">
+        <div className="flex items-center gap-2">
+          <div className={cn('h-2 w-2 rounded-full', connected ? 'bg-success' : 'bg-destructive')} />
+          <span className={cn('text-sm', connected ? 'text-success' : 'text-destructive')}>
             {connected ? 'Подключено' : 'Отключено'}
           </span>
         </div>
-        <div style={{ marginLeft: 16, display: 'flex', gap: 8 }}>
+        <div className="flex gap-2">
           <ModeButton mode="AUTO" current={mode} onClick={handleModeChange} />
           <ModeButton mode="MANUAL" current={mode} onClick={handleModeChange} />
           <ModeButton mode="FAILSAFE" current={mode} onClick={handleModeChange} />
         </div>
         {failsafeReason && (
-          <div style={{ marginLeft: 16, background: '#742a2a33', border: '1px solid #fc8181', borderRadius: 6, padding: '4px 12px', color: '#fc8181', fontSize: 13 }}>
-            ⚠ FAILSAFE: {failsafeReason}
-          </div>
+          <Badge variant="destructive">⚠ FAILSAFE: {failsafeReason}</Badge>
         )}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button style={{ padding: '5px 12px', borderRadius: 5, cursor: 'pointer', fontSize: 12, background: simRunning ? '#742a2a44' : '#276749', color: '#fff', border: 'none', fontWeight: 600 }}
-            onClick={() => handleSimControl(simRunning ? 'stop' : 'start')}>
+        <div className="ml-auto flex gap-2">
+          <Button size="sm" variant={simRunning ? 'destructive' : 'default'} onClick={() => handleSimControl(simRunning ? 'stop' : 'start')}>
             {simRunning ? '⏹ Стоп симуляции' : '▶ Запуск симуляции'}
-          </button>
-          <button style={{ padding: '5px 12px', borderRadius: 5, cursor: 'pointer', fontSize: 12, background: '#2d3748', color: '#a0aec0', border: 'none' }}
-            onClick={() => handleSimControl('reset')}>
-            ↺ Сброс
-          </button>
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => handleSimControl('reset')}>↺ Сброс</Button>
         </div>
-      </div>
+      </Card>
 
-      <div style={s.row}>
+      <div className="flex flex-wrap gap-3">
         {/* Camera with recognition results (left) */}
-        <div style={{ flex: '1 1 380px', maxWidth: 560, minWidth: 300 }}>
+        <div className="min-w-[300px] max-w-[560px] flex-[1_1_380px]">
           <CameraView />
         </div>
 
         {/* Traffic lights panel (right) */}
-        <div style={{ ...s.card, minWidth: 280, flex: '0 0 auto' }}>
-          <div style={s.cardTitle}>🚦 Светофоры{shownLights.length > 0 && shownLights[0].from_si ? ' · Smart Intersection' : ''}</div>
+        <Card className="min-w-[280px] flex-none p-4">
+          <CardTitle className="mb-3 flex items-center gap-2 text-sm">
+            🚦 Светофоры{shownLights.length > 0 && shownLights[0].from_si ? ' · Smart Intersection' : ''}
+          </CardTitle>
           {shownLights.length === 0 && (
-            <div style={{ color: '#718096', fontSize: 13 }}>Нет данных о светофорах (запустите Smart Intersection)</div>
+            <div className="text-sm text-muted-foreground">Нет данных о светофорах (запустите Smart Intersection)</div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="flex flex-col gap-2.5">
             {shownLights.map(light => (
-              <div key={light.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#131722', borderRadius: 8, padding: '8px 12px' }}>
+              <div key={light.id} className="flex items-center gap-3 rounded-lg bg-background px-3 py-2">
                 <TrafficLightBulb state={light.state} size={20} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, color: '#e2e8f0' }}>{light.id}</div>
-                  <div style={{ fontSize: 11, color: '#718096' }}>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold">{light.id}</div>
+                  <div className="text-[11px] text-muted-foreground">
                     {light.direction || '—'} · фаза {light.phase_index + 1}
                   </div>
-                  <div style={{ fontSize: 11, color: '#718096' }}>
+                  <div className="text-[11px] text-muted-foreground">
                     {light.from_si ? `переключений: ${light.phase_switches}` : `Осталось: ${Math.round(light.time_remaining)}с`}
                   </div>
                   {light.sections && Object.keys(light.sections).length > 0 && (
-                    <div style={{ fontSize: 11, marginTop: 2, display: 'flex', gap: 8 }}>
+                    <div className="mt-0.5 flex gap-2 text-[11px]">
                       {Object.entries(light.sections).map(([m, st]) => (
                         <span key={m} style={{ color: LIGHT_COLORS[st] }}>{SECTION_GLYPH[m] ?? m} {st}</span>
                       ))}
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <div style={{
-                    padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
-                    background: LIGHT_COLORS[light.state] + '22', color: LIGHT_COLORS[light.state]
-                  }}>{light.state}</div>
+                <div className="flex items-center gap-1">
+                  <div className="rounded px-2 py-0.5 text-[11px] font-bold" style={{ background: LIGHT_COLORS[light.state] + '22', color: LIGHT_COLORS[light.state] }}>
+                    {light.state}
+                  </div>
                 </div>
                 {mode === 'MANUAL' && !light.from_si && (
-                  <div style={{ display: 'flex', gap: 3 }}>
+                  <div className="flex gap-1">
                     {['RED', 'YELLOW', 'GREEN'].map(st => (
-                      <button key={st}
-                        style={{ width: 14, height: 14, borderRadius: '50%', background: LIGHT_COLORS[st], border: light.state === st ? '2px solid #fff' : '2px solid transparent', cursor: 'pointer' }}
+                      <button key={st} className="h-3.5 w-3.5 cursor-pointer rounded-full"
+                        style={{ background: LIGHT_COLORS[st], border: light.state === st ? '2px solid #fff' : '2px solid transparent' }}
                         onClick={() => handleManualLight(light.id, st)} />
                     ))}
                   </div>
@@ -227,36 +219,34 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-        </div>
+        </Card>
 
         {/* Pedestrian lights panel */}
         {siPedLights.length > 0 && (
-          <div style={{ ...s.card, minWidth: 220, flex: '0 0 auto' }}>
-            <div style={s.cardTitle}>🚶 Пешеходные светофоры</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Card className="min-w-[220px] flex-none p-4">
+            <CardTitle className="mb-3 text-sm">🚶 Пешеходные светофоры</CardTitle>
+            <div className="flex flex-col gap-2">
               {siPedLights.map(p => (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                                          background: '#131722', borderRadius: 8, padding: '8px 12px' }}>
+                <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg bg-background px-3 py-2">
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: '#e2e8f0' }}>{p.id}</div>
-                    <div style={{ fontSize: 11, color: '#718096' }}>
+                    <div className="text-sm font-semibold">{p.id}</div>
+                    <div className="text-[11px] text-muted-foreground">
                       переключений: {p.phase_switches} · ждут: {p.waiting_peds} · переходят: {p.crossing_peds}
                     </div>
                   </div>
-                  <div style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
-                                background: LIGHT_COLORS[p.state] + '22', color: LIGHT_COLORS[p.state] }}>
+                  <div className="rounded px-2 py-0.5 text-[11px] font-bold" style={{ background: LIGHT_COLORS[p.state] + '22', color: LIGHT_COLORS[p.state] }}>
                     {p.state === 'GREEN' ? 'ИДИТЕ' : 'СТОЙТЕ'}
                   </div>
                 </div>
               ))}
             </div>
-          </div>
+          </Card>
         )}
 
         {/* Stats */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="flex flex-1 flex-col gap-3">
           {/* KPI row */}
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div className="flex flex-wrap gap-2.5">
             <StatCard label="Авто в очереди" value={traffic.total_cars || 0} color="#63b3ed" />
             <StatCard label="Грузовики" value={traffic.total_trucks || 0} color="#ed8936" />
             <StatCard label="Пешеходы" value={traffic.total_pedestrians || 0} color="#b794f4" />
@@ -268,85 +258,81 @@ export default function Dashboard() {
           </div>
 
           {/* Additional badges */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div className="flex flex-wrap gap-2">
             {extra.congestion_level && (
-              <div style={{ padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: CONGESTION_COLORS[extra.congestion_level] + '22', color: CONGESTION_COLORS[extra.congestion_level], border: `1px solid ${CONGESTION_COLORS[extra.congestion_level]}44` }}>
+              <Badge style={{ background: CONGESTION_COLORS[extra.congestion_level] + '22', color: CONGESTION_COLORS[extra.congestion_level], borderColor: CONGESTION_COLORS[extra.congestion_level] + '44' }}>
                 Трафик: {extra.congestion_level}
-              </div>
+              </Badge>
             )}
             {extra.pedestrian_risk && (
-              <div style={{ padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: '#b794f422', color: '#b794f4', border: '1px solid #b794f444' }}>
+              <Badge style={{ background: '#b794f422', color: '#b794f4', borderColor: '#b794f444' }}>
                 Риск пешеходов: {extra.pedestrian_risk}
-              </div>
+              </Badge>
             )}
-            <div style={{ padding: '4px 12px', borderRadius: 6, fontSize: 12, background: '#2d3748', color: '#a0aec0' }}>
-              Переключений: {system.phase_switches || 0}
-            </div>
-            <div style={{ padding: '4px 12px', borderRadius: 6, fontSize: 12, background: '#2d3748', color: '#a0aec0' }}>
-              Аптайм: {Math.floor((system.uptime_seconds || 0) / 60)}м {Math.round((system.uptime_seconds || 0) % 60)}с
-            </div>
+            <Badge variant="secondary">Переключений: {system.phase_switches || 0}</Badge>
+            <Badge variant="secondary">Аптайм: {Math.floor((system.uptime_seconds || 0) / 60)}м {Math.round((system.uptime_seconds || 0) % 60)}с</Badge>
           </div>
         </div>
       </div>
 
       {/* Charts row */}
-      <div style={s.row}>
+      <div className="flex flex-wrap gap-3">
         {/* Vehicle count chart */}
-        <div style={{ ...s.card, flex: 1, minWidth: 300 }}>
-          <div style={s.cardTitle}>📈 Транспортный поток</div>
+        <Card className="min-w-[300px] flex-1 p-4">
+          <CardTitle className="mb-3 text-sm">📈 Транспортный поток</CardTitle>
           <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="t" tick={{ fill: '#718096', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#718096', fontSize: 10 }} />
-              <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #4a5568', color: '#e2e8f0', fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 11, color: '#a0aec0' }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="t" tick={CHART_TICK} />
+              <YAxis tick={CHART_TICK} />
+              <Tooltip contentStyle={CHART_TOOLTIP} />
+              <Legend wrapperStyle={{ fontSize: 11, color: 'hsl(var(--muted-foreground))' }} />
               <Area type="monotone" dataKey="cars" stackId="1" stroke="#63b3ed" fill="#63b3ed33" name="Авто" />
               <Area type="monotone" dataKey="trucks" stackId="1" stroke="#ed8936" fill="#ed893633" name="Грузов." />
               <Area type="monotone" dataKey="pedestrians" stackId="1" stroke="#b794f4" fill="#b794f433" name="Пешеходы" />
             </AreaChart>
           </ResponsiveContainer>
-        </div>
+        </Card>
 
         {/* Wait time chart */}
-        <div style={{ ...s.card, flex: 1, minWidth: 300 }}>
-          <div style={s.cardTitle}>⏱ Время ожидания</div>
+        <Card className="min-w-[300px] flex-1 p-4">
+          <CardTitle className="mb-3 text-sm">⏱ Время ожидания</CardTitle>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="t" tick={{ fill: '#718096', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#718096', fontSize: 10 }} />
-              <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #4a5568', color: '#e2e8f0', fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 11, color: '#a0aec0' }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="t" tick={CHART_TICK} />
+              <YAxis tick={CHART_TICK} />
+              <Tooltip contentStyle={CHART_TOOLTIP} />
+              <Legend wrapperStyle={{ fontSize: 11, color: 'hsl(var(--muted-foreground))' }} />
               <Line type="monotone" dataKey="waitCar" stroke="#63b3ed" dot={false} name="Авто (сек)" strokeWidth={2} />
               <Line type="monotone" dataKey="waitPed" stroke="#b794f4" dot={false} name="Пешеходы (сек)" strokeWidth={2} />
             </LineChart>
           </ResponsiveContainer>
-        </div>
+        </Card>
 
         {/* Throughput chart */}
-        <div style={{ ...s.card, flex: 1, minWidth: 260 }}>
-          <div style={s.cardTitle}>✅ Пропускная способность</div>
+        <Card className="min-w-[260px] flex-1 p-4">
+          <CardTitle className="mb-3 text-sm">✅ Пропускная способность</CardTitle>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={chartData.slice(-20)}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="t" tick={{ fill: '#718096', fontSize: 10 }} />
-              <YAxis tick={{ fill: '#718096', fontSize: 10 }} />
-              <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #4a5568', color: '#e2e8f0', fontSize: 12 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="t" tick={CHART_TICK} />
+              <YAxis tick={CHART_TICK} />
+              <Tooltip contentStyle={CHART_TOOLTIP} />
               <Bar dataKey="throughput" fill="#68d391" name="Прошло" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </Card>
       </div>
 
       {/* System status */}
-      <div style={{ ...s.card, display: 'flex', gap: 16, flexWrap: 'wrap', padding: '12px 20px' }}>
+      <Card className="flex flex-wrap gap-4 px-5 py-3">
         <StatusDot label="Камера" status={system.camera_status || 'simulation'} />
         <StatusDot label="YOLO" status={system.yolo_status || 'simulation'} />
         <StatusDot label="Режим" value={mode} color={MODE_COLORS[mode]} />
         <StatusDot label="FPS" value={`${(system.camera_fps || 0).toFixed(0)}`} />
         <StatusDot label="Ошибок" value={system.error_count || 0} color={(system.error_count || 0) > 0 ? '#fc8181' : '#68d391'} />
-      </div>
+      </Card>
     </div>
   )
 }
@@ -358,12 +344,10 @@ function StatusDot({ label, status, value, color }) {
   }[status] || color || '#68d391'
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor }} />
-      <span style={{ color: '#718096', fontSize: 12 }}>{label}:</span>
-      <span style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 600 }}>
-        {value || status || '—'}
-      </span>
+    <div className="flex items-center gap-1.5">
+      <div className="h-1.5 w-1.5 rounded-full" style={{ background: statusColor }} />
+      <span className="text-xs text-muted-foreground">{label}:</span>
+      <span className="text-xs font-semibold">{value || status || '—'}</span>
     </div>
   )
 }
