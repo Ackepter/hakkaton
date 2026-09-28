@@ -148,7 +148,10 @@ class _CvSource(CameraSource):
             raise CameraError("OpenCV is not installed (pip install opencv-python-headless)") from e
         self._cv2 = cv2
         target = self._target()
-        cap = cv2.VideoCapture(target)
+        # Windows' default backend (MSMF/ANY) enumerates a second UVC webcam unreliably - it opens but frame
+        # grabs intermittently fail, leaving the camera stuck "connecting". DSHOW is the reliable one there.
+        cap = cv2.VideoCapture(target, cv2.CAP_DSHOW) if self.kind == "usb" and os.name == "nt" \
+            else cv2.VideoCapture(target)
         if not cap.isOpened():
             cap.release()
             raise CameraError(f"cannot open {self.kind} source {target!r}")

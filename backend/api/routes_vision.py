@@ -127,3 +127,17 @@ async def discover():
     """USB cameras visible to OpenCV (empty when none / OpenCV missing)."""
     found = await asyncio.to_thread(discover_usb_cameras)
     return {"usb": found}
+
+
+class DeviceSelect(BaseModel):
+    uri: str = Field(..., min_length=1)
+
+
+@router.post("/cameras/{camera_id}/device")
+async def select_device(camera_id: str, body: DeviceSelect):
+    """Point a usb/file/network camera at a different device index / path / URL and reconnect."""
+    p = _pipeline(camera_id)
+    if p.cfg.source not in ("usb", "file", "network"):
+        raise HTTPException(status_code=400, detail=f"camera {camera_id!r} has no selectable device (source={p.cfg.source!r})")
+    await p.switch_uri(body.uri)
+    return p.status(detail=False)

@@ -96,6 +96,15 @@ class CameraPipeline:
         self.camera_state = "connecting"
         logger.info("Camera %s connect requested", self.cfg.id)
 
+    async def switch_uri(self, uri: str) -> None:
+        """Point a usb/file/network camera at a different device/path/URL and reconnect (Task: multi-USB picker)."""
+        self.cfg.uri = uri
+        await asyncio.to_thread(self.source.close)
+        self._enabled, self._next_open = True, 0.0
+        self._started_at, self._last_frame_at = self._clock(), None
+        self.camera_state = "connecting"
+        logger.info("Camera %s switched to %s", self.cfg.id, _redact(uri))
+
     # ------------------------------------------------------------------ main loop
     async def _run(self) -> None:
         period = 1.0 / self.cfg.fps
@@ -120,10 +129,14 @@ class CameraPipeline:
             if now < self._next_open:
                 return
             self.camera_state = "connecting" if self._last_frame_at is None else "no_signal"
+            opening_uri = self.cfg.uri
             try:
                 await asyncio.to_thread(self.source.open)
             except CameraError as e:
                 self._camera_failed(str(e), now)
+                return
+            if self.cfg.uri != opening_uri:      # switch_uri() ran while open() was blocking - discard, retry
+                await asyncio.to_thread(self.source.close)
                 return
             self.camera_error = None
         try:

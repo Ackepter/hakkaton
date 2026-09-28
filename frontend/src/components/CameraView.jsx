@@ -28,6 +28,8 @@ export default function CameraView({ compact = false }) {
   const [selected, setSelected] = useState(null)
   const [zones, setZones] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [usbDevices, setUsbDevices] = useState(null)
+  const [usbLoading, setUsbLoading] = useState(false)
 
   const cams = vision?.cameras ?? []
   const cam = cams.find(c => c.id === selected) ?? cams[0]
@@ -38,6 +40,29 @@ export default function CameraView({ compact = false }) {
     setBusy(true)
     try {
       await api.post(`/api/vision/cameras/${cam.id}/${cam.enabled ? 'disconnect' : 'connect'}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const loadUsbDevices = async () => {
+    if (usbLoading) return
+    setUsbLoading(true)
+    try {
+      const r = await api.get('/api/vision/discover')
+      setUsbDevices(r.data.usb ?? [])
+    } catch {
+      setUsbDevices([])
+    } finally {
+      setUsbLoading(false)
+    }
+  }
+
+  const selectDevice = async (index) => {
+    if (!cam || busy) return
+    setBusy(true)
+    try {
+      await api.post(`/api/vision/cameras/${cam.id}/device`, { uri: String(index) })
     } finally {
       setBusy(false)
     }
@@ -106,6 +131,26 @@ export default function CameraView({ compact = false }) {
       </div>
       {det.error && <div className="mt-1 text-[11px] text-destructive">{det.error}</div>}
       {cam.error && <div className="mt-1 text-[11px] text-destructive">{cam.error}</div>}
+
+      {cam.source === 'usb' && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">USB устройство:</span>
+          <button onClick={loadUsbDevices} disabled={usbLoading}
+                  className="rounded border border-input px-2 py-0.5 text-[11px]">
+            {usbLoading ? '…' : '🔍 обновить список'}
+          </button>
+          {usbDevices === null ? null : usbDevices.length === 0 ? (
+            <span className="text-[11px] text-destructive">не найдено</span>
+          ) : (
+            <select value={cam.uri} disabled={busy} onChange={e => selectDevice(e.target.value)}
+                    className="rounded border border-input bg-background text-[11px]">
+              {usbDevices.map(d => (
+                <option key={d.index} value={d.index}>#{d.index} ({d.width}x{d.height})</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         {counts.length === 0 && <span className="text-[11px] text-muted-foreground">объектов нет</span>}
