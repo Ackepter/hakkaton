@@ -141,3 +141,28 @@ async def select_device(camera_id: str, body: DeviceSelect):
         raise HTTPException(status_code=400, detail=f"camera {camera_id!r} has no selectable device (source={p.cfg.source!r})")
     await p.switch_uri(body.uri)
     return p.status(detail=False)
+
+
+class TestModeStart(BaseModel):
+    camera_id: str = Field(..., min_length=1)
+    ip: str = Field(..., min_length=1)
+    port: int = Field(9000, ge=1, le=65535)
+
+
+@router.get("/test-mode")
+async def test_mode_status():
+    """USB test mode: person detected on the given camera -> green on the real light at ip:port, else red."""
+    return app_state.usb_test_mode.status()
+
+
+@router.post("/test-mode/start")
+async def test_mode_start(body: TestModeStart):
+    _pipeline(body.camera_id)  # 404 if the camera doesn't exist
+    await app_state.usb_test_mode.start(body.camera_id, body.ip, body.port)
+    return app_state.usb_test_mode.status()
+
+
+@router.post("/test-mode/stop")
+async def test_mode_stop():
+    await app_state.usb_test_mode.stop()
+    return app_state.usb_test_mode.status()

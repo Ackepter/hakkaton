@@ -19,6 +19,7 @@ from .metrics.collector import MetricsCollector
 from .vision import CameraConfig, VisionManager, Zone, build_manager, load_cameras, perception_payload
 from .vision.sim_view import SimView
 from .vision.bridge import SimulationBridge
+from .vision.usb_test_mode import UsbTestMode
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class AppState:
         self._config_path = settings.intersection_config_path
         self.vision: Optional[VisionManager] = None
         self.bridge: Optional[SimulationBridge] = None
+        self.usb_test_mode = UsbTestMode(get_pipeline=lambda cam_id: self.vision.pipelines.get(cam_id) if self.vision else None)
 
     # ---- vision (cameras -> detection -> analysis); optional, never required to run the backend
     async def start_vision(self, configs: Optional[List[CameraConfig]] = None) -> None:

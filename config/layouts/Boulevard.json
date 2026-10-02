@@ -42,7 +42,7 @@
       "speed_limit_mps": 13.9,
       "crossing": true,
       "weight": 0.7,
-      "light_ip": "10.142.22.56",
+      "light_ip": null,
       "light_port": 9000
     },
     "east": {

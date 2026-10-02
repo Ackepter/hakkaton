@@ -5,7 +5,7 @@
  * the analysis used). Works the same for a simulation camera, a video file, a USB or a network camera.
  * A camera that is disconnected / has no signal shows a labelled placeholder — the page never breaks.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import api from '../api/client'
 import useVision from '../hooks/useVision'
 
@@ -19,6 +19,8 @@ const CLASS_COLOR = {
   car: '#3b82f6', truck: '#f97316', bus: '#22c55e', tram: '#a855f7', emergency: '#ef4444',
   person: '#facc15', motorcycle: '#06b6d4', bicycle: '#84cc16',
 }
+const PHASE_COLOR = { GREEN: '#68d391', BLINK: '#68d391', YELLOW: '#f6e05e', RED: '#fc8181' }
+const PHASE_LABEL = { GREEN: '🟢 зелёный', BLINK: '🟢 мигает', YELLOW: '🟡 жёлтый', RED: '🔴 красный' }
 
 export const streamUrl = (id, zones) =>
   `${api.defaults.baseURL}/api/vision/cameras/${id}/stream?overlay=true&zones=${zones}`
@@ -30,10 +32,44 @@ export default function CameraView({ compact = false }) {
   const [busy, setBusy] = useState(false)
   const [usbDevices, setUsbDevices] = useState(null)
   const [usbLoading, setUsbLoading] = useState(false)
+  const [testMode, setTestMode] = useState(null)
+  const [testIp, setTestIp] = useState('192.168.1.200')
+  const [testPort, setTestPort] = useState('9000')
+  const [testBusy, setTestBusy] = useState(false)
 
   const cams = vision?.cameras ?? []
   const cam = cams.find(c => c.id === selected) ?? cams[0]
   const analysis = vision?.analysis
+
+  useEffect(() => {
+    let alive = true
+    const poll = async () => {
+      try {
+        const r = await api.get('/api/vision/test-mode')
+        if (alive) setTestMode(r.data)
+      } catch { /* backend offline - useVision already reports this */ }
+    }
+    poll()
+    const t = setInterval(poll, 1000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+
+  const toggleTestMode = async () => {
+    if (!cam || testBusy) return
+    setTestBusy(true)
+    try {
+      if (testMode?.active) {
+        await api.post('/api/vision/test-mode/stop')
+      } else {
+        const port = parseInt(testPort, 10) || 9000
+        await api.post('/api/vision/test-mode/start', { camera_id: cam.id, ip: testIp, port })
+      }
+      const r = await api.get('/api/vision/test-mode')
+      setTestMode(r.data)
+    } finally {
+      setTestBusy(false)
+    }
+  }
 
   const toggle = async () => {
     if (!cam || busy) return
@@ -148,6 +184,32 @@ export default function CameraView({ compact = false }) {
                 <option key={d.index} value={d.index}>#{d.index} ({d.width}x{d.height})</option>
               ))}
             </select>
+          )}
+        </div>
+      )}
+
+      {cam.source === 'usb' && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded border border-input p-1.5">
+          <button onClick={toggleTestMode} disabled={testBusy}
+                  className="rounded px-2.5 py-1 text-[11px] font-semibold text-white"
+                  style={{ background: testMode?.active && testMode.camera_id === cam.id ? '#742a2a' : '#2c5282' }}>
+            {testMode?.active && testMode.camera_id === cam.id ? '⏹ Выключить тестовый режим' : '🚦 Тестовый режим'}
+          </button>
+          <input value={testIp} onChange={e => setTestIp(e.target.value)}
+                 disabled={testMode?.active} placeholder="IP светофора"
+                 className="w-28 rounded border border-input bg-background px-1.5 py-0.5 text-[11px]" />
+          <span className="text-[11px] text-muted-foreground">:</span>
+          <input value={testPort} onChange={e => setTestPort(e.target.value)}
+                 disabled={testMode?.active} placeholder="9000"
+                 className="w-14 rounded border border-input bg-background px-1.5 py-0.5 text-[11px]" />
+          {testMode?.active && testMode.camera_id === cam.id && (
+            <span className="text-[11px] font-semibold" style={{ color: PHASE_COLOR[testMode.phase] || '#a0aec0' }}>
+              {PHASE_LABEL[testMode.phase] || testMode.phase} · {testMode.person_detected ? 'person есть' : 'person нет'}
+              {' '}→ {testMode.ip}:{testMode.port}
+            </span>
+          )}
+          {testMode?.active && testMode.camera_id !== cam.id && (
+            <span className="text-[11px] text-muted-foreground">запущен на {testMode.camera_id}</span>
           )}
         </div>
       )}

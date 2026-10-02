@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     broadcast_task.cancel()
+    await app_state.usb_test_mode.stop()
     await app_state.stop_vision()
     await app_state.simulator.stop()
     await app_state.controller.stop()
