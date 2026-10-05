@@ -35,6 +35,9 @@ MAX_GREEN = 60.0
 FAILSAFE_GREEN = 20.0
 YELLOW_S = 3.0
 ALL_RED_S = 3.0          # minimum all-red clearance
+GREEN_BLINK_COUNT = 3
+GREEN_BLINK_HALF_S = 0.5   # 1 blink/second (on+off = 1s); real-signal-only, wall-clock timed, added on top of YELLOW
+RED_TO_GREEN_YELLOW_S = 2.0   # real-signal-only: show YELLOW this long before GREEN on a RED -> GREEN edge
 MAX_ALL_RED_S = 12.0     # hard cap while waiting for the box to clear
 EMERGENCY_MIN_GREEN = 5.0
 EMERGENCY_LOOKAHEAD_M = 60.0
@@ -126,6 +129,12 @@ class SimulationEngine:
         self._phase_elapsed = 0.0
         self._overrides: Dict[str, str] = {}
         self._ped_overrides: Dict[str, str] = {}
+        self._prev_hw_state: Dict[str, str] = {}    # real signal only: last mirrored state, to catch state edges
+        self._hw_blink_start: Dict[str, float] = {}
+        self._hw_hold_state: Dict[str, str] = {}      # state to freeze on, post-blink, so it gets its full duration
+        self._hw_hold_duration: Dict[str, float] = {}
+        self._hw_hold_until: Dict[str, float] = {}
+        self._hw_pregreen_start: Dict[str, float] = {}
         self.camera_failure = False           # virtual camera unplugged (scenario / API switch)
         self._perception: Optional[dict] = None  # latest camera-derived demand pushed by the main project
         self._perception_at = 0.0
@@ -633,7 +642,47 @@ class SimulationEngine:
             light.sections = self._light_sections(light.direction, light.state)
             hw = self._light_hw.get(lid)
             if hw is not None:
-                hw.send(light.state)          # mirror the main lamp to the real signal; this never feeds back
+                hw.send(self._hw_state(lid, light.state, duration))  # mirror to the real signal; never feeds back
+
+    def _hw_state(self, lid: str, state: str, duration: float) -> str:
+        """What the real signal should actually show for `lid` right now: `state`, except right around two edges —
+        both wall-clock timed, real-signal-only, and never touching sim state or phase timing (a light with no real
+        hardware behind `lid` never even calls this):
+        * GREEN -> * : blink green GREEN_BLINK_COUNT times, added on top, then freeze on the new state (e.g YELLOW)
+          for its own full `duration` before resuming live mirroring — so the blink never eats into it.
+        * RED -> GREEN : hold YELLOW for RED_TO_GREEN_YELLOW_S before actually going GREEN."""
+        now = time.monotonic()
+        prev = self._prev_hw_state.get(lid)
+        if prev == "GREEN" and state != "GREEN":
+            self._hw_blink_start[lid] = now
+            self._hw_hold_state[lid] = state
+            self._hw_hold_duration[lid] = duration
+        if prev == "RED" and state == "GREEN":
+            self._hw_pregreen_start[lid] = now
+        self._prev_hw_state[lid] = state
+
+        start = self._hw_blink_start.get(lid)
+        if start is not None:
+            half = int((now - start) / GREEN_BLINK_HALF_S + 1e-9)  # +epsilon guards float truncation at exact boundaries
+            if half < GREEN_BLINK_COUNT * 2:
+                return "GREEN" if half % 2 == 0 else "OFF"
+            self._hw_blink_start.pop(lid, None)
+            self._hw_hold_until[lid] = now + self._hw_hold_duration.pop(lid)
+
+        hold_until = self._hw_hold_until.get(lid)
+        if hold_until is not None:
+            if now < hold_until:
+                return self._hw_hold_state[lid]
+            self._hw_hold_until.pop(lid, None)
+            self._hw_hold_state.pop(lid, None)
+
+        pregreen = self._hw_pregreen_start.get(lid)
+        if pregreen is not None:
+            if now - pregreen < RED_TO_GREEN_YELLOW_S:
+                return "YELLOW"
+            self._hw_pregreen_start.pop(lid, None)
+
+        return state
 
     def _light_sections(self, direction: str, main_state: str) -> Dict[str, str]:
         """One extra arrow lamp per turning movement this arm's lanes use. RED/YELLOW mirrors the main lamp; on GREEN a

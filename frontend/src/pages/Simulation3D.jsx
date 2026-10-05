@@ -17,12 +17,13 @@ import useVision from '../hooks/useVision'
 import useLayoutDraft from '../builder/useLayoutDraft'
 import { errorList, layoutApi, SI_URL } from '../builder/api'
 import { ARMS } from '../builder/geometry'
+import { Button } from '@/components/ui/button'
+import { Hammer } from 'lucide-react'
 
 const WS_URL = `ws://${window.location.hostname}:8001/ws/state`
 const API_URL = `${SI_URL}/simulation/state`
 const LIGHT_COLORS = { RED: '#ef4444', YELLOW: '#fbbf24', GREEN: '#22c55e' }
 const SECTION_GLYPH = { left: '↰', right: '↱', uturn: '↩' }
-const NAV_H = 56
 
 const FALLBACK_LAYOUT = {
   version: 1, name: 'Crossroads', junction: 'signal', scenery: [], cameras: [],
@@ -219,9 +220,8 @@ export default function Simulation3D() {
     : tool?.startsWith('spawn:') ? 'Click next to a road to add it there. Click the tool again to stop.' : null
 
   return (
-    <div style={{ display: 'flex', height: `calc(100vh - ${NAV_H}px)`, overflow: 'hidden', background: '#0f172a' }}>
-      <aside style={{ width: build ? 330 : 200, flexShrink: 0, overflowY: 'auto', background: '#111827',
-                      borderRight: '1px solid #1e293b', padding: 12 }}>
+    <div className="flex h-screen overflow-hidden bg-background">
+      <aside className="shrink-0 overflow-y-auto border-r border-border bg-card p-3" style={{ width: build ? 330 : 220 }}>
         {build && draft ? (
           <BuilderPanel draft={draft} dirty={d.dirty} actions={d.actions} undo={d.undo} redo={d.redo}
                         canUndo={d.canUndo} canRedo={d.canRedo} tool={tool} setTool={setTool} rotation={rotation}
@@ -232,17 +232,17 @@ export default function Simulation3D() {
                         onDownload={download} onUpload={upload} />
         ) : (
           <>
-            <button onClick={edit} data-testid="edit-city"
-                    style={{ width: '100%', marginBottom: 12, background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 6,
-                             padding: '8px 10px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>🏗 Build mode</button>
+            <Button onClick={edit} data-testid="edit-city" className="mb-3 w-full" size="sm">
+              <Hammer className="h-3.5 w-3.5" /> Build mode
+            </Button>
             <SimControls simStatus={status} metrics={metrics} cameraFailure={!!simState?.camera_failure}
                          failsafeReason={simState?.failsafe_reason ?? null} />
-            {message && <div style={{ color: '#86efac', fontSize: 11, marginTop: 8 }}>{message}</div>}
+            {message && <div className="mt-2 text-xs text-success">{message}</div>}
           </>
         )}
       </aside>
 
-      <main style={{ flex: 1, position: 'relative', minWidth: 0, height: '100%' }}>
+      <main className="relative min-w-0 h-full flex-1">
         <IntersectionScene layout={layout} vehicles={vehicles} pedestrians={pedestrians} lights={lights}
                            pedestrianLights={pedestrianLights}
                            cameraStatus={cameraStatus} mode={mode} tool={tool} selection={selection}
@@ -250,17 +250,16 @@ export default function Simulation3D() {
                            rotation={rotation} onSpawn={onSpawn} />
         <Toolbar mode={mode} tool={tool} setTool={setTool} hint={hint} />
 
-        <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(0,0,0,0.65)', color: '#e2e8f0', fontSize: 11,
-                      borderRadius: 6, padding: '6px 10px', lineHeight: 1.8, pointerEvents: 'none' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', display: 'inline-block', background: connected ? '#4ade80' : '#f87171' }} />
+        <div className="pointer-events-none absolute left-2.5 top-2.5 rounded-md bg-black/65 px-2.5 py-1.5 text-xs leading-loose text-foreground">
+          <div className="flex items-center gap-1.5">
+            <span className={`inline-block h-2 w-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
             {connected ? 'Connected' : 'Offline'} · {layout.name}
           </div>
-          {build ? <div style={{ color: '#c4b5fd' }}>BUILD MODE{d.dirty ? ' · unsaved changes' : ''}</div> : (
+          {build ? <div className="text-violet-300">BUILD MODE{d.dirty ? ' · unsaved changes' : ''}</div> : (
             <>
               <div>Sim time: {simTime.toFixed(1)}s</div>
               <div>Speed: {simState?.time_scale ?? 1}×</div>
-              <div style={{ color: simState?.failsafe_reason ? '#fca5a5' : '#86efac' }}>
+              <div className={simState?.failsafe_reason ? 'text-red-300' : 'text-green-300'}>
                 Signals: {simState?.failsafe_reason ? `FAILSAFE (${simState.failsafe_reason})` : (simState?.signal_mode === 'fixed' ? 'PROGRAM' : 'AUTO')}
               </div>
             </>
@@ -268,60 +267,58 @@ export default function Simulation3D() {
         </div>
 
         {error && !build && (
-          <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, background: 'rgba(127,29,29,0.9)', color: '#fca5a5',
-                        fontSize: 11, borderRadius: 6, padding: '6px 10px' }}>{error}</div>
+          <div className="absolute bottom-2.5 left-2.5 right-2.5 rounded-md bg-red-950/90 px-2.5 py-1.5 text-xs text-red-300">{error}</div>
         )}
       </main>
 
       {!build && (
-        <aside style={{ width: 300, flexShrink: 0, overflowY: 'auto', background: '#111827', borderLeft: '1px solid #1e293b',
-                        padding: 12, color: '#e2e8f0', fontSize: 11 }}>
-          <div style={{ marginBottom: 12 }}><CameraView compact /></div>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: '#f1f5f9' }}>Live Metrics</div>
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ color: '#64748b', marginBottom: 4 }}>Traffic Lights</div>
+        <aside className="w-[300px] shrink-0 overflow-y-auto border-l border-border bg-card p-3 text-xs">
+          <div className="mb-3"><CameraView compact /></div>
+          <div className="mb-2.5 text-sm font-semibold">Live Metrics</div>
+          <div className="mb-2.5">
+            <div className="mb-1 text-muted-foreground">Traffic Lights</div>
             {lights.map(l => (
-              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, gap: 6 }}>
-                <span style={{ textTransform: 'capitalize', color: '#cbd5e1' }}>{l.direction}</span>
-                <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div key={l.id} className="mb-0.5 flex items-center justify-between gap-1.5">
+                <span className="capitalize text-foreground/80">{l.direction}</span>
+                <span className="flex items-center gap-1.5">
                   {Object.entries(l.sections ?? {}).map(([m, s]) => (
-                    <span key={m} title={`${m} arrow`} style={{ fontFamily: 'monospace', fontSize: 10, color: LIGHT_COLORS[s] ?? '#888' }}>
+                    <span key={m} title={`${m} arrow`} className="font-mono text-[10px]" style={{ color: LIGHT_COLORS[s] ?? '#888' }}>
                       {SECTION_GLYPH[m] ?? m}
                     </span>
                   ))}
-                  <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[l.state] ?? '#888' }}>{l.state}</span>
+                  <span className="font-mono font-semibold" style={{ color: LIGHT_COLORS[l.state] ?? '#888' }}>{l.state}</span>
                 </span>
               </div>
             ))}
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ color: '#64748b', marginBottom: 4 }}>Pedestrian Lights</div>
+          <div className="mb-2.5">
+            <div className="mb-1 text-muted-foreground">Pedestrian Lights</div>
             {pedestrianLights.map(p => (
-              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                <span style={{ textTransform: 'capitalize', color: '#cbd5e1' }}>{p.direction}</span>
-                <span style={{ fontFamily: 'monospace', fontWeight: 600, color: LIGHT_COLORS[p.state] ?? '#888' }}>
+              <div key={p.id} className="mb-0.5 flex justify-between">
+                <span className="capitalize text-foreground/80">{p.direction}</span>
+                <span className="font-mono font-semibold" style={{ color: LIGHT_COLORS[p.state] ?? '#888' }}>
                   {p.state === 'GREEN' ? 'WALK' : 'DON’T WALK'}
                 </span>
               </div>
             ))}
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ color: '#64748b', marginBottom: 4 }}>Приоритет камеры</div>
-            <div style={{ color: cameraPriority?.camera_ok ? '#e2e8f0' : '#fbbf24', fontWeight: 600 }}>
+          <div className="mb-2.5">
+            <div className="mb-1 text-muted-foreground">Приоритет камеры</div>
+            <div className={`font-semibold ${cameraPriority?.camera_ok ? 'text-foreground' : 'text-amber-400'}`}>
               {!cameraPriority?.camera_ok ? 'Таймерный режим · камера недоступна'
                 : cameraPriority.recipient === 'pedestrians' ? '🚶 Пешеходам'
                   : cameraPriority.recipient === 'drivers' ? '🚗 Водителям'
                     : cameraPriority.recipient === 'balanced' ? 'Поровну · обычный режим' : 'Очередей нет'}
             </div>
             {cameraPriority?.camera_ok && (
-              <div style={{ color: '#94a3b8', marginTop: 2 }}>
+              <div className="mt-0.5 text-muted-foreground">
                 Пешеходов: {cameraPriority.pedestrians} · машин: {cameraPriority.vehicles}
               </div>
             )}
           </div>
           {metrics ? (
             <div>
-              <div style={{ color: '#64748b', marginBottom: 4 }}>Performance</div>
+              <div className="mb-1 text-muted-foreground">Performance</div>
               <MRow label="Vehicles" value={metrics.vehicles_active} />
               <MRow label="Waiting" value={metrics.vehicles_waiting} />
               <MRow label="Passed" value={metrics.passed_total} />
@@ -330,12 +327,12 @@ export default function Simulation3D() {
               <MRow label="Congestion" value={`${(metrics.congestion_pct ?? 0).toFixed(0)}%`} />
               <MRow label="Light switches" value={metrics.phase_switches} />
               <MRow label="Ped signal switches" value={metrics.ped_signal_switches} />
-              <div style={{ color: '#64748b', marginBottom: 4, marginTop: 8 }}>Pedestrians</div>
+              <div className="mb-1 mt-2 text-muted-foreground">Pedestrians</div>
               <MRow label="Waiting" value={metrics.pedestrians_waiting} />
               <MRow label="Crossing" value={metrics.pedestrians_crossing} />
               <MRow label="Crossed" value={metrics.peds_crossed_total} />
             </div>
-          ) : <div style={{ color: '#475569', textAlign: 'center', marginTop: 24 }}>Start a scenario to see metrics</div>}
+          ) : <div className="mt-6 text-center text-muted-foreground/60">Start a scenario to see metrics</div>}
         </aside>
       )}
     </div>
@@ -344,9 +341,9 @@ export default function Simulation3D() {
 
 function MRow({ label, value }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-      <span style={{ color: '#94a3b8' }}>{label}</span>
-      <span style={{ fontFamily: 'monospace' }}>{value ?? '—'}</span>
+    <div className="mb-0.5 flex justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-mono">{value ?? '—'}</span>
     </div>
   )
 }

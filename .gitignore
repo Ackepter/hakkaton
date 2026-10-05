@@ -62,3 +62,6 @@ models/*.onnx
 
 # Constructor: remembered layout pointer (user layouts themselves may be committed)
 config/layouts/.last
+
+# Generated docs
+ARCHITECTURE.md
